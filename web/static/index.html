@@ -1,0 +1,1053 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎭 Agnes 漫剧生成器</title>
+<style>
+:root {
+  --bg: #0a0a0f;
+  --surface: #13131a;
+  --surface2: #1a1a24;
+  --border: #2a2a3a;
+  --text: #e8e8f0;
+  --text2: #8888a0;
+  --accent: #6c5ce7;
+  --accent2: #a29bfe;
+  --success: #00b894;
+  --warning: #fdcb6e;
+  --error: #e17055;
+  --glow: rgba(108, 92, 231, 0.3);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, 'SF Pro', 'Helvetica Neue', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ===== Layout ===== */
+.app { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+header {
+  text-align: center;
+  padding: 40px 0 30px;
+  position: relative;
+}
+header::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 200px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+}
+header h1 {
+  font-size: 2em;
+  background: linear-gradient(135deg, var(--accent2), #fd79a8);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 700;
+}
+header p { color: var(--text2); margin-top: 8px; font-size: 0.95em; }
+
+/* ===== Cards ===== */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 20px;
+  transition: border-color 0.3s;
+}
+.card:hover { border-color: var(--accent); }
+.card h2 {
+  font-size: 1.1em;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ===== Form ===== */
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.form-group { display: flex; flex-direction: column; gap: 6px; }
+.form-group.full { grid-column: 1 / -1; }
+.form-group label {
+  font-size: 0.85em;
+  color: var(--text2);
+  font-weight: 500;
+}
+.form-group input,
+.form-group select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 0.95em;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.form-group input:focus,
+.form-group select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--glow);
+}
+.form-group select option { background: var(--surface); }
+
+.btn-generate {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, var(--accent), #8b5cf6);
+  color: white;
+  border: none;
+  border-radius: 12px;
+  padding: 14px 32px;
+  font-size: 1.05em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  margin-top: 8px;
+}
+.btn-generate:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px var(--glow);
+}
+.btn-generate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+/* ===== Progress ===== */
+.steps {
+  display: flex;
+  justify-content: space-between;
+  margin: 20px 0;
+  position: relative;
+}
+.steps::before {
+  content: '';
+  position: absolute;
+  top: 20px;
+  left: 40px;
+  right: 40px;
+  height: 2px;
+  background: var(--border);
+}
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  z-index: 1;
+  flex: 1;
+}
+.step-circle {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--surface2);
+  border: 2px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1em;
+  transition: all 0.4s;
+}
+.step-circle.active {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--glow);
+  animation: pulse 1.5s infinite;
+}
+.step-circle.done {
+  border-color: var(--success);
+  background: var(--success);
+}
+.step-circle.failed {
+  border-color: var(--error);
+  background: var(--error);
+}
+.step-label { font-size: 0.75em; color: var(--text2); text-align: center; }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 12px var(--glow); }
+  50% { box-shadow: 0 0 24px var(--glow); }
+}
+
+/* ===== Log ===== */
+.log-box {
+  background: #0d0d14;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  max-height: 260px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.82em;
+  line-height: 1.6;
+}
+.log-box::-webkit-scrollbar { width: 6px; }
+.log-box::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.log-line { white-space: pre-wrap; word-break: break-all; }
+.log-line.success { color: var(--success); }
+.log-line.error { color: var(--error); }
+.log-line.info { color: var(--accent2); }
+.log-line.warn { color: var(--warning); }
+
+/* ===== Preview ===== */
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.preview-item {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: transform 0.2s, border-color 0.2s;
+  cursor: pointer;
+}
+.preview-item:hover {
+  transform: translateY(-3px);
+  border-color: var(--accent);
+}
+.preview-item img,
+.preview-item video {
+  width: 100%;
+  display: block;
+  aspect-ratio: 9/16;
+  object-fit: cover;
+}
+.preview-item .caption {
+  padding: 8px 12px;
+  font-size: 0.8em;
+  color: var(--text2);
+}
+.preview-item .caption span {
+  color: var(--text);
+  font-weight: 500;
+}
+
+/* ===== Final Video ===== */
+.final-video {
+  text-align: center;
+  padding: 20px;
+}
+.final-video video {
+  max-width: 360px;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+}
+.final-video .badge {
+  display: inline-block;
+  background: var(--success);
+  color: #fff;
+  padding: 4px 14px;
+  border-radius: 20px;
+  font-size: 0.85em;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+/* ===== History ===== */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+.history-item:hover { border-color: var(--accent); }
+.history-item .title { font-weight: 500; }
+.history-item .meta { color: var(--text2); font-size: 0.85em; }
+
+/* ===== Status Badges ===== */
+.status-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 0.75em;
+  font-weight: 600;
+}
+.status-badge.running { background: var(--accent); color: #fff; }
+.status-badge.done { background: var(--success); color: #fff; }
+.status-badge.failed { background: var(--error); color: #fff; }
+.status-badge.pending { background: var(--border); color: var(--text2); }
+
+/* ===== Tabs ===== */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  background: var(--surface2);
+  padding: 4px;
+  border-radius: 10px;
+}
+.tab {
+  flex: 1;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tab.active {
+  background: var(--accent);
+  color: #fff;
+}
+.tab:hover:not(.active) { color: var(--text); }
+
+/* ===== Modal (Image Preview) ===== */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.85);
+  z-index: 1000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.modal-overlay.show { display: flex; }
+.modal-overlay img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 12px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 640px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .form-group.full { grid-column: 1; }
+  .steps { gap: 4px; }
+  .step-label { font-size: 0.65em; }
+  header h1 { font-size: 1.5em; }
+}
+
+/* ===== Settings Modal ===== */
+.settings-btn {
+  position: absolute;
+  top: 40px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text2);
+  font-size: 1.3em;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.settings-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 12px var(--glow);
+}
+.settings-btn.has-key {
+  color: var(--success);
+  border-color: var(--success);
+}
+
+.settings-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 2000;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.settings-modal.show { display: flex; }
+.settings-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 32px;
+  width: 90%;
+  max-width: 480px;
+  animation: fadeIn 0.3s ease;
+}
+.settings-content h2 {
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-content .field {
+  margin-bottom: 16px;
+}
+.settings-content .field label {
+  display: block;
+  font-size: 0.85em;
+  color: var(--text2);
+  margin-bottom: 6px;
+}
+.settings-content .field .hint {
+  font-size: 0.78em;
+  color: var(--text2);
+  margin-top: 4px;
+}
+.settings-content .field input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: 0.95em;
+  outline: none;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  transition: border-color 0.2s;
+}
+.settings-content .field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--glow);
+}
+.settings-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+}
+.settings-actions button {
+  flex: 1;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.95em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-save {
+  background: linear-gradient(135deg, var(--accent), #8b5cf6);
+  color: white;
+  font-weight: 600;
+}
+.btn-save:hover { box-shadow: 0 4px 16px var(--glow); }
+.btn-test {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border) !important;
+}
+.btn-test:hover { border-color: var(--accent) !important; }
+.btn-cancel {
+  background: var(--surface2);
+  color: var(--text2);
+  border: 1px solid var(--border) !important;
+}
+.test-result {
+  margin-top: 10px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 0.85em;
+}
+.test-result.success { background: rgba(0,184,148,0.15); color: var(--success); }
+.test-result.error { background: rgba(225,112,85,0.15); color: var(--error); }
+.key-status {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 0.75em;
+  font-weight: 600;
+  margin-left: 8px;
+}
+.key-status.ok { background: rgba(0,184,148,0.2); color: var(--success); }
+.key-status.no { background: rgba(225,112,85,0.2); color: var(--error); }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <h1>🎭 Agnes 漫剧生成器</h1>
+    <p>免费全流程 AI 漫剧：剧本 → 角色 → 分镜 → 视频 → 成片</p>
+    <button class="settings-btn" id="settingsBtn" onclick="openSettings()" title="API 配置">⚙️</button>
+  </header>
+
+  <!-- 生成表单 -->
+  <div class="card fade-in" id="formCard">
+    <h2>✨ 创建漫剧</h2>
+    <div class="form-grid">
+      <div class="form-group full">
+        <label>主题 / 故事</label>
+        <input type="text" id="theme" placeholder="例：少年剑仙三年归来" maxlength="100">
+      </div>
+      <div class="form-group">
+        <label>风格</label>
+        <select id="style">
+          <option value="三渲二国风">三渲二国风</option>
+          <option value="水墨">水墨</option>
+          <option value="赛博朋克">赛博朋克</option>
+          <option value="日系动漫">日系动漫</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>类型</label>
+        <select id="genre">
+          <option value="仙侠">仙侠</option>
+          <option value="宫斗">宫斗</option>
+          <option value="江湖">江湖</option>
+          <option value="都市">都市</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>总时长（秒）</label>
+        <input type="number" id="duration" value="15" min="5" max="300" step="5">
+      </div>
+      <div class="form-group">
+        <label>单镜头时长（秒）</label>
+        <input type="number" id="sceneDuration" value="5" min="3" max="15">
+      </div>
+      <button class="btn-generate" id="btnGenerate" onclick="startGeneration()">
+        🚀 开始生成
+      </button>
+    </div>
+  </div>
+
+  <!-- 进度区域 -->
+  <div class="card fade-in" id="progressCard" style="display:none;">
+    <h2>📊 生成进度</h2>
+    <div class="steps">
+      <div class="step" id="step1">
+        <div class="step-circle" id="step1-circle">📝</div>
+        <div class="step-label">剧本</div>
+      </div>
+      <div class="step" id="step2">
+        <div class="step-circle" id="step2-circle">🎨</div>
+        <div class="step-label">角色</div>
+      </div>
+      <div class="step" id="step3">
+        <div class="step-circle" id="step3-circle">🖼️</div>
+        <div class="step-label">分镜</div>
+      </div>
+      <div class="step" id="step4">
+        <div class="step-circle" id="step4-circle">📹</div>
+        <div class="step-label">视频</div>
+      </div>
+      <div class="step" id="step5">
+        <div class="step-circle" id="step5-circle">🎬</div>
+        <div class="step-label">成片</div>
+      </div>
+    </div>
+    <div class="log-box" id="logBox"></div>
+  </div>
+
+  <!-- 预览区域 -->
+  <div class="card fade-in" id="previewCard" style="display:none;">
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('script')">📜 剧本</button>
+      <button class="tab" onclick="switchTab('characters')">🎨 角色</button>
+      <button class="tab" onclick="switchTab('storyboard')">🖼️ 分镜</button>
+      <button class="tab" onclick="switchTab('videos')">📹 视频</button>
+      <button class="tab" onclick="switchTab('final')">🎬 成片</button>
+    </div>
+    <div id="tabScript" class="tab-content"></div>
+    <div id="tabCharacters" class="tab-content" style="display:none;"></div>
+    <div id="tabStoryboard" class="tab-content" style="display:none;"></div>
+    <div id="tabVideos" class="tab-content" style="display:none;"></div>
+    <div id="tabFinal" class="tab-content" style="display:none;"></div>
+  </div>
+
+  <!-- 历史记录 -->
+  <div class="card fade-in" id="historyCard">
+    <h2>📋 历史记录</h2>
+    <div class="history-list" id="historyList">
+      <div style="color: var(--text2); font-size: 0.9em; padding: 12px;">暂无记录</div>
+    </div>
+  </div>
+</div>
+
+<!-- 图片大图 Modal -->
+<div class="modal-overlay" id="imageModal" onclick="closeModal()">
+  <img id="modalImage" src="">
+</div>
+
+<!-- 设置 Modal -->
+<div class="settings-modal" id="settingsModal">
+  <div class="settings-content" onclick="event.stopPropagation()">
+    <h2>⚙️ API 配置 <span class="key-status" id="keyStatus"></span></h2>
+    <div class="field">
+      <label>AGNES_API_KEY</label>
+      <input type="password" id="inputApiKey" placeholder="sk-..." autocomplete="off">
+      <div class="hint">密钥仅保存在本地 config.json，不会上传到任何服务器。<br>免费获取：<a href="https://platform.agnes-ai.com" target="_blank" style="color:var(--accent2)">platform.agnes-ai.com</a></div>
+    </div>
+    <div id="testResult"></div>
+    <div class="settings-actions">
+      <button class="btn-test" onclick="testApiKey()">🔍 测试连接</button>
+      <button class="btn-save" onclick="saveSettings()">💾 保存</button>
+      <button class="btn-cancel" onclick="closeSettings()">取消</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== State =====
+let currentJobId = null;
+let pollTimer = null;
+
+// ===== API =====
+const API = '';
+
+async function api(method, path, body) {
+  const opts = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(API + path, opts);
+  return resp.json();
+}
+
+// ===== Generation =====
+async function startGeneration() {
+  const theme = document.getElementById('theme').value.trim();
+  if (!theme) {
+    document.getElementById('theme').focus();
+    return;
+  }
+
+  const btn = document.getElementById('btnGenerate');
+  btn.disabled = true;
+  btn.textContent = '⏳ 提交中...';
+
+  try {
+    const res = await api('POST', '/api/generate', {
+      theme,
+      style: document.getElementById('style').value,
+      genre: document.getElementById('genre').value,
+      duration: parseInt(document.getElementById('duration').value) || 15,
+      scene_duration: parseInt(document.getElementById('sceneDuration').value) || 5,
+    });
+
+    if (res.error) {
+      alert(res.error);
+      btn.disabled = false;
+      btn.textContent = '🚀 开始生成';
+      return;
+    }
+
+    currentJobId = res.job_id;
+    document.getElementById('progressCard').style.display = '';
+    document.getElementById('previewCard').style.display = 'none';
+    document.getElementById('logBox').innerHTML = '';
+    resetSteps();
+
+    btn.textContent = '🔄 生成中...';
+
+    // 开始轮询
+    startPolling();
+
+  } catch (e) {
+    alert('请求失败：' + e.message);
+    btn.disabled = false;
+    btn.textContent = '🚀 开始生成';
+  }
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(pollStatus, 1500);
+}
+
+async function pollStatus() {
+  if (!currentJobId) return;
+
+  try {
+    const res = await api('GET', `/api/jobs/${currentJobId}`);
+    if (res.error) return;
+
+    // 更新日志
+    updateLogs(res.logs || []);
+
+    // 更新步骤状态
+    updateSteps(res.logs || []);
+
+    // 任务完成
+    if (res.status === 'done') {
+      clearInterval(pollTimer);
+      const btn = document.getElementById('btnGenerate');
+      btn.disabled = false;
+      btn.textContent = '🚀 开始生成';
+      setStepState(5, 'done');
+
+      // 加载预览
+      loadPreview(res);
+    } else if (res.status === 'failed') {
+      clearInterval(pollTimer);
+      const btn = document.getElementById('btnGenerate');
+      btn.disabled = false;
+      btn.textContent = '🚀 开始生成';
+    }
+
+    // 更新历史
+    loadHistory();
+
+  } catch (e) {
+    console.error('Poll error:', e);
+  }
+}
+
+// ===== Log =====
+function updateLogs(logs) {
+  const box = document.getElementById('logBox');
+  const wasAtBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+
+  box.innerHTML = logs.map(l => {
+    let cls = '';
+    if (l.includes('✅') || l.includes('🎉')) cls = 'success';
+    else if (l.includes('❌') || l.includes('失败')) cls = 'error';
+    else if (l.includes('📝') || l.includes('🎨') || l.includes('🖼️') || l.includes('📹') || l.includes('🎬') || l.includes('步骤')) cls = 'info';
+    else if (l.includes('⚠️') || l.includes('超时')) cls = 'warn';
+    return `<div class="log-line ${cls}">${escapeHtml(l)}</div>`;
+  }).join('');
+
+  if (wasAtBottom) box.scrollTop = box.scrollHeight;
+}
+
+// ===== Steps =====
+function resetSteps() {
+  for (let i = 1; i <= 5; i++) {
+    const c = document.getElementById(`step${i}-circle`);
+    c.className = 'step-circle';
+  }
+}
+
+function setStepState(step, state) {
+  const c = document.getElementById(`step${step}-circle`);
+  c.className = 'step-circle ' + state;
+}
+
+function updateSteps(logs) {
+  const stepMap = {
+    '步骤 1': 1, 'Step 1': 1,
+    '步骤 2': 2, 'Step 2': 2,
+    '步骤 3': 3, 'Step 3': 3,
+    '步骤 4': 4, 'Step 4': 4,
+    '步骤 5': 5, 'Step 5': 5,
+  };
+
+  let currentStep = 0;
+  for (const l of logs) {
+    for (const [key, step] of Object.entries(stepMap)) {
+      if (l.includes(key)) {
+        currentStep = step;
+        break;
+      }
+    }
+    // Mark completed steps
+    if (l.includes('已存在，跳过') || (l.includes('✅') && !l.includes('S0'))) {
+      // Find which step
+      if (l.includes('剧本')) setStepState(1, 'done');
+      if (l.includes('角色')) setStepState(2, 'done');
+      if (l.includes('分镜关键帧已保存')) setStepState(3, 'done');
+      if (l.includes('视频已保存') && !l.includes('轮询')) setStepState(4, 'done');
+      if (l.includes('成片已保存')) setStepState(5, 'done');
+    }
+  }
+
+  // Set active step
+  for (let i = 1; i <= 5; i++) {
+    const c = document.getElementById(`step${i}-circle`);
+    if (c.classList.contains('done')) continue;
+    if (i === currentStep) {
+      c.className = 'step-circle active';
+    }
+  }
+}
+
+// ===== Preview =====
+async function loadPreview(job) {
+  document.getElementById('previewCard').style.display = '';
+
+  try {
+    const filesRes = await api('GET', `/api/jobs/${currentJobId}/files`);
+    const files = filesRes.files || [];
+
+    // 剧本
+    const scriptFile = files.find(f => f.path === 'script.json');
+    if (scriptFile) {
+      const scriptResp = await fetch(`/api/files/${currentJobId}/script.json`);
+      const script = await scriptResp.json();
+      renderScript(script);
+    }
+
+    // 角色
+    const charImages = files.filter(f => f.path.includes('characters/') && f.is_image);
+    renderCharacters(charImages);
+
+    // 分镜
+    const sbImages = files.filter(f => f.path.includes('storyboard/') && f.is_image);
+    renderStoryboard(sbImages);
+
+    // 视频
+    const videos = files.filter(f => f.is_video && !f.path.includes('final'));
+    renderVideos(videos);
+
+    // 成片
+    const finalVid = files.find(f => f.path === 'final.mp4');
+    renderFinal(finalVid);
+
+  } catch (e) {
+    console.error('Preview error:', e);
+  }
+}
+
+function renderScript(script) {
+  const el = document.getElementById('tabScript');
+  let html = `<div style="margin-bottom:16px;"><strong style="font-size:1.2em;">${script.title}</strong></div>`;
+
+  if (script.characters?.length) {
+    html += `<div style="margin-bottom:14px;"><em style="color:var(--accent2);">角色</em></div>`;
+    for (const c of script.characters) {
+      html += `<div style="background:var(--surface2);padding:10px 14px;border-radius:8px;margin-bottom:8px;">
+        <strong>${c.name}</strong> <span style="color:var(--text2);">（${c.age}岁）</span>
+        <div style="color:var(--text2);font-size:0.9em;margin-top:4px;">${c.visual} · ${c.personality}</div>
+      </div>`;
+    }
+  }
+
+  if (script.scenes?.length) {
+    html += `<div style="margin:14px 0 8px;"><em style="color:var(--accent2);">场景</em></div>`;
+    for (const s of script.scenes) {
+      html += `<div style="background:var(--surface2);padding:10px 14px;border-radius:8px;margin-bottom:8px;">
+        <strong>${s.id}</strong> · ${s.location} · ${s.time}
+        <div style="margin-top:4px;">${s.action}</div>
+        <div style="color:var(--text2);font-size:0.85em;margin-top:4px;">${s.camera} · ${s.mood}</div>
+        ${s.dialogue?.map(d => `<div style="color:var(--accent2);margin-top:4px;">"${d.text}"</div>`).join('') || ''}
+      </div>`;
+    }
+  }
+
+  el.innerHTML = html;
+}
+
+function renderCharacters(images) {
+  const el = document.getElementById('tabCharacters');
+  if (!images.length) {
+    el.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center;">暂无角色卡</div>';
+    return;
+  }
+  el.innerHTML = `<div class="preview-grid">${images.map(f => `
+    <div class="preview-item" onclick="openImage('/api/files/${currentJobId}/${f.path}')">
+      <img src="/api/files/${currentJobId}/${f.path}" loading="lazy" alt="${f.path}">
+      <div class="caption"><span>${f.path.split('/').pop()}</span></div>
+    </div>
+  `).join('')}</div>`;
+}
+
+function renderStoryboard(images) {
+  const el = document.getElementById('tabStoryboard');
+  if (!images.length) {
+    el.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center;">暂无分镜帧</div>';
+    return;
+  }
+  el.innerHTML = `<div class="preview-grid">${images.map(f => `
+    <div class="preview-item" onclick="openImage('/api/files/${currentJobId}/${f.path}')">
+      <img src="/api/files/${currentJobId}/${f.path}" loading="lazy" alt="${f.path}">
+      <div class="caption"><span>${f.path.split('/').pop()}</span></div>
+    </div>
+  `).join('')}</div>`;
+}
+
+function renderVideos(videos) {
+  const el = document.getElementById('tabVideos');
+  if (!videos.length) {
+    el.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center;">暂无视频</div>';
+    return;
+  }
+  el.innerHTML = `<div class="preview-grid">${videos.map(f => `
+    <div class="preview-item">
+      <video src="/api/files/${currentJobId}/${f.path}" controls preload="metadata"></video>
+      <div class="caption"><span>${f.path.split('/').pop()}</span> · ${formatSize(f.size)}</div>
+    </div>
+  `).join('')}</div>`;
+}
+
+function renderFinal(video) {
+  const el = document.getElementById('tabFinal');
+  if (!video) {
+    el.innerHTML = '<div style="color:var(--text2);padding:20px;text-align:center;">成片尚未生成</div>';
+    return;
+  }
+  el.innerHTML = `<div class="final-video">
+    <div class="badge">✅ 生成完成 · 💰 ¥0.00</div><br>
+    <video src="/api/files/${currentJobId}/${video.path}" controls autoplay style="max-width:360px;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.5);"></video>
+    <div style="margin-top:12px;color:var(--text2);">${formatSize(video.size)}</div>
+  </div>`;
+}
+
+// ===== Tabs =====
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+
+  const tabMap = { script: 'tabScript', characters: 'tabCharacters', storyboard: 'tabStoryboard', videos: 'tabVideos', final: 'tabFinal' };
+  const idxMap = { script: 0, characters: 1, storyboard: 2, videos: 3, final: 4 };
+
+  document.getElementById(tabMap[name]).style.display = '';
+  document.querySelectorAll('.tab')[idxMap[name]].classList.add('active');
+}
+
+// ===== Image Modal =====
+function openImage(src) {
+  document.getElementById('modalImage').src = src;
+  document.getElementById('imageModal').classList.add('show');
+}
+function closeModal() {
+  document.getElementById('imageModal').classList.remove('show');
+}
+
+// ===== History =====
+async function loadHistory() {
+  try {
+    const res = await api('GET', '/api/jobs');
+    const list = res.jobs || [];
+    const el = document.getElementById('historyList');
+
+    if (!list.length) {
+      el.innerHTML = '<div style="color:var(--text2);font-size:0.9em;padding:12px;">暂无记录</div>';
+      return;
+    }
+
+    el.innerHTML = list.map(j => `
+      <div class="history-item" onclick="viewJob('${j.id}')">
+        <div>
+          <div class="title">${j.theme || '未知'}</div>
+          <div class="meta">ID: ${j.id}</div>
+        </div>
+        <span class="status-badge ${j.status}">${j.status}</span>
+      </div>
+    `).join('');
+  } catch (e) {}
+}
+
+async function viewJob(jobId) {
+  currentJobId = jobId;
+  document.getElementById('progressCard').style.display = '';
+  document.getElementById('logBox').innerHTML = '';
+  resetSteps();
+  startPolling();
+}
+
+// ===== Utilities =====
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function formatSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
+/* ===== Animations ===== */
+.fade-in { animation: fadeIn 0.4s ease; }
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+// ===== Settings =====
+async function loadConfig() {
+  try {
+    const res = await api('GET', '/api/config');
+    const btn = document.getElementById('settingsBtn');
+    const status = document.getElementById('keyStatus');
+    if (res.has_key) {
+      btn.classList.add('has-key');
+      status.className = 'key-status ok';
+      status.textContent = '已配置';
+    } else {
+      btn.classList.remove('has-key');
+      status.className = 'key-status no';
+      status.textContent = '未配置';
+    }
+  } catch(e) {}
+}
+
+function openSettings() {
+  document.getElementById('settingsModal').classList.add('show');
+  document.getElementById('testResult').innerHTML = '';
+  // 加载当前 key（脱敏）
+  loadConfig();
+  // 清空输入框，让用户输入新 key
+  document.getElementById('inputApiKey').value = '';
+  document.getElementById('inputApiKey').placeholder = '输入新的 API KEY（留空则保留现有配置）';
+}
+
+function closeSettings() {
+  document.getElementById('settingsModal').classList.remove('show');
+}
+
+async function saveSettings() {
+  const key = document.getElementById('inputApiKey').value.trim();
+  if (!key) {
+    closeSettings();
+    return;
+  }
+  await api('POST', '/api/config', { AGNES_API_KEY: key });
+  closeSettings();
+  loadConfig();
+}
+
+async function testApiKey() {
+  const key = document.getElementById('inputApiKey').value.trim();
+  if (!key) {
+    document.getElementById('testResult').innerHTML = '<div class="test-result error">请先输入 API KEY</div>';
+    return;
+  }
+  // 先保存再测试
+  await api('POST', '/api/config', { AGNES_API_KEY: key });
+  const res = await api('POST', '/api/config/test');
+  if (res.ok) {
+    document.getElementById('testResult').innerHTML = `<div class="test-result success">${res.message}</div>`;
+  } else {
+    document.getElementById('testResult').innerHTML = `<div class="test-result error">❌ ${res.error}</div>`;
+  }
+  loadConfig();
+}
+
+// 点击背景关闭
+ document.getElementById('settingsModal').addEventListener('click', function(e) {
+  if (e.target === this) closeSettings();
+});
+
+// ===== Init =====
+loadHistory();
+loadConfig();
+</script>
+</body>
+</html>

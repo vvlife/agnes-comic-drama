@@ -1,0 +1,19 @@
+# 本地配置（含 API KEY，勿提交）
+config.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# 输出
+output/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
