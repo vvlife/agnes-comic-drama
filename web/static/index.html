@@ -476,6 +476,69 @@ header p { color: var(--text2); margin-top: 8px; font-size: 0.95em; }
 }
 .test-result.success { background: rgba(0,184,148,0.15); color: var(--success); }
 .test-result.error { background: rgba(225,112,85,0.15); color: var(--error); }
+
+/* ===== Duration Picker ===== */
+.duration-picker {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dur-btn {
+  flex: 1;
+  min-width: 56px;
+  padding: 10px 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface2);
+  color: var(--text2);
+  font-size: 0.95em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: center;
+  line-height: 1.3;
+}
+.dur-btn small {
+  font-weight: 400;
+  font-size: 0.75em;
+  opacity: 0.7;
+}
+.dur-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.dur-btn.active {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, rgba(0,212,255,0.15), rgba(139,92,246,0.15));
+  color: var(--accent);
+  box-shadow: 0 0 10px var(--glow);
+}
+
+.scene-dur-picker {
+  display: flex;
+  gap: 8px;
+}
+.sdur-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface2);
+  color: var(--text2);
+  font-size: 0.9em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.sdur-btn:hover {
+  border-color: var(--accent2);
+  color: var(--accent2);
+}
+.sdur-btn.active {
+  border-color: var(--accent2);
+  background: rgba(255,107,129,0.12);
+  color: var(--accent2);
+}
 .key-status {
   display: inline-block;
   padding: 2px 10px;
@@ -524,12 +587,24 @@ header p { color: var(--text2); margin-top: 8px; font-size: 0.95em; }
         </select>
       </div>
       <div class="form-group">
-        <label>总时长（秒）</label>
-        <input type="number" id="duration" value="15" min="5" max="300" step="5">
+        <label>漫剧时长</label>
+        <div class="duration-picker">
+          <button class="dur-btn active" data-dur="15" onclick="setDuration(this,15)">15s<br><small>闪剧</small></button>
+          <button class="dur-btn" data-dur="30" onclick="setDuration(this,30)">30s<br><small>短剧</small></button>
+          <button class="dur-btn" data-dur="60" onclick="setDuration(this,60)">60s<br><small>小品</small></button>
+          <button class="dur-btn" data-dur="180" onclick="setDuration(this,180)">3min<br><small>正片</small></button>
+          <button class="dur-btn" data-dur="300" onclick="setDuration(this,300)">5min<br><small>长篇</small></button>
+        </div>
+        <input type="hidden" id="duration" value="15">
       </div>
       <div class="form-group">
-        <label>单镜头时长（秒）</label>
-        <input type="number" id="sceneDuration" value="5" min="3" max="15">
+        <label>单镜头时长</label>
+        <div class="scene-dur-picker">
+          <button class="sdur-btn active" data-sdur="5" onclick="setSceneDur(this,5)">5s</button>
+          <button class="sdur-btn" data-sdur="10" onclick="setSceneDur(this,10)">10s</button>
+          <button class="sdur-btn" data-sdur="15" onclick="setSceneDur(this,15)">15s</button>
+        </div>
+        <input type="hidden" id="sceneDuration" value="5">
       </div>
       <button class="btn-generate" id="btnGenerate" onclick="startGeneration()">
         🚀 开始生成
@@ -1048,6 +1123,18 @@ async function testApiKey() {
 // ===== Init =====
 loadHistory();
 loadConfig();
+
+// ===== Duration Pickers =====
+function setDuration(btn, val) {
+  document.querySelectorAll('.dur-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('duration').value = val;
+}
+function setSceneDur(btn, val) {
+  document.querySelectorAll('.sdur-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('sceneDuration').value = val;
+}
 </script>
 </body>
 </html>

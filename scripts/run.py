@@ -75,6 +75,14 @@ IMAGE_SIZES = {
     "square": "1024x1024",    # 1:1
 }
 
+# 视频时长 → num_frames 映射（必须满足 8n+1 且 ≤441）
+# frame_rate = 24
+SCENE_DURATION_MAP = {
+    5: 121,    # 5s → 121 frames (5.04s)
+    10: 241,   # 10s → 241 frames (10.04s)
+    15: 361,   # 15s → 361 frames (15.04s)
+}
+
 DEFAULTS = {
     "duration_total": 180,
     "scene_duration": 5,
@@ -352,14 +360,16 @@ def generate_storyboard(client: AgnesClient, script: dict, style: str,
 
 def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
                     vid_dir: pathlib.Path, cp: Checkpoint,
-                    rate_limiter: RateLimiter) -> dict:
+                    rate_limiter: RateLimiter,
+                    scene_duration: int = 5) -> dict:
     """用 agnes-video-v2.0 图生视频。"""
 
     if cp.is_done("videos"):
         print("✅ 视频已存在，跳过")
         return {}
 
-    print(f"\n📹 步骤 4/5：图生视频（{len(script['scenes'])} 个镜头）...")
+    num_frames = SCENE_DURATION_MAP.get(scene_duration, 121)
+    print(f"\n📹 步骤 4/5：图生视频（{len(script['scenes'])} 个镜头，每镜头 ~{scene_duration}s / {num_frames}帧）...")
     cp.mark_running("videos")
 
     manifest = {}
@@ -396,7 +406,7 @@ def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
                 image=image_input,
                 height=1344,
                 width=768,
-                num_frames=121,   # ~5s
+                num_frames=num_frames,
                 frame_rate=24,
             )
             manifest[sid] = str(out_path)
@@ -414,8 +424,8 @@ def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
 # ===================== 步骤 5：成片拼接 =====================
 
 def edit_final(project_dir: pathlib.Path, script: dict, vid_manifest: dict,
-               cp: Checkpoint) -> pathlib.Path | None:
-    """用 ffmpeg 拼接视频 + 烧字幕。"""
+               cp: Checkpoint, scene_duration: int = 5) -> pathlib.Path | None:
+    """用 ffmpeg 拼接视频 + 转场 + 烧字幕。"""
 
     if cp.is_done("edit"):
         final = project_dir / "final.mp4"
@@ -442,44 +452,87 @@ def edit_final(project_dir: pathlib.Path, script: dict, vid_manifest: dict,
         print("  ❌ 没有可用的视频文件")
         return None
 
-    # 创建 concat list
-    concat_file = project_dir / "concat.txt"
-    with open(concat_file, "w") as f:
+    # 多镜头时：加 xfade 转场拼接
+    if len(video_files) == 1:
+        # 单镜头，直接复制
+        import shutil
+        shutil.copy2(video_files[0], final)
+    else:
+        # 构建 xfade 滤镜链
+        transition_duration = 0.5  # 转场时长 0.5s
+        n = len(video_files)
+
+        # 输入
+        inputs = []
         for vf in video_files:
-            f.write(f"file '{vf}'\n")
+            inputs += ["-i", str(vf)]
 
-    # 生成 SRT 字幕
-    srt_path = project_dir / "subtitle.srt"
-    generate_srt(script, srt_path)
+        # 构建 xfade 滤镜链
+        # 获取每个视频的实际时长
+        durations = []
+        for vf in video_files:
+            dur = get_video_duration(vf)
+            durations.append(dur)
 
-    # ffmpeg concat
-    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file)]
+        # xfade 链：[0][1]xfade=transition=fade:duration=T:offset=O[v01]; [v01][2]xfade=...
+        filter_parts = []
+        offset = durations[0] - transition_duration
+        for i in range(n - 1):
+            if i == 0:
+                in_a = f"[{i}:v]"
+                in_b = f"[{i+1}:v]"
+            else:
+                in_a = f"[v{i-1}{i}]"
+                in_b = f"[{i+1}:v]"
 
-    if srt_path.exists():
-        cmd += ["-vf", f"subtitles={srt_path}"]
+            out_label = f"[v{i}{i+1}]" if i < n - 2 else "[vout]"
 
-    cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "23",
-            "-c:a", "aac", "-b:a", "128k", str(final)]
+            trans_type = "fade"  # 可扩展：fade/slideleft/dissolve/wipeleft 等
+            filter_parts.append(f"{in_a}{in_b}xfade=transition={trans_type}:duration={transition_duration}:offset={offset}{out_label}")
 
-    print(f"  执行：{' '.join(cmd[:6])}...")
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
-            print(f"  ⚠️ ffmpeg 错误：{result.stderr[:500]}")
-            # 尝试不带字幕
-            cmd_simple = ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
-                          "-i", str(concat_file),
-                          "-c:v", "libx264", "-preset", "medium", "-crf", "23",
-                          "-c:a", "aac", "-b:a", "128k", str(final)]
-            result = subprocess.run(cmd_simple, capture_output=True, text=True, timeout=300)
+            if i < n - 2:
+                offset += durations[i + 1] - transition_duration
+
+        vfilter = ";".join(filter_parts)
+
+        cmd = ["ffmpeg", "-y"] + inputs + ["-filter_complex", vfilter, "-map", "[vout]",
+               "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+               "-an", str(final)]
+
+        print(f"  拼接 {n} 个镜头，转场：fade（{transition_duration}s）...")
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
             if result.returncode != 0:
-                print(f"  ❌ ffmpeg 失败：{result.stderr[:500]}")
-                return None
-    except FileNotFoundError:
-        print("  ❌ 未安装 ffmpeg，请先安装：brew install ffmpeg")
-        return None
-    except subprocess.TimeoutExpired:
-        print("  ❌ ffmpeg 超时")
+                print(f"  ⚠️ xfade 拼接失败：{result.stderr[:300]}")
+                print(f"  回退到简单拼接...")
+                _simple_concat(video_files, project_dir, final)
+        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+            print(f"  ⚠️ xfade 拼接出错：{e}，回退简单拼接...")
+            _simple_concat(video_files, project_dir, final)
+
+    # 烧字幕
+    srt_path = project_dir / "subtitle.srt"
+    generate_srt(script, srt_path, scene_duration=scene_duration)
+
+    if srt_path.exists() and srt_path.stat().st_size > 0 and final.exists():
+        final_sub = project_dir / "final_with_sub.mp4"
+        sub_cmd = ["ffmpeg", "-y", "-i", str(final),
+                   "-vf", f"subtitles={srt_path}",
+                   "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+                   "-c:a", "copy", str(final_sub)]
+        try:
+            result = subprocess.run(sub_cmd, capture_output=True, text=True, timeout=300)
+            if result.returncode == 0 and final_sub.exists():
+                # 替换 final
+                final.unlink()
+                final_sub.rename(final)
+                print(f"  ✅ 字幕已烧录")
+            else:
+                final_sub.unlink(missing_ok=True)
+        except Exception:
+            final_sub.unlink(missing_ok=True)
+
+    if not final.exists():
         return None
 
     cp.mark_done("edit")
@@ -487,21 +540,48 @@ def edit_final(project_dir: pathlib.Path, script: dict, vid_manifest: dict,
     return final
 
 
-def generate_srt(script: dict, out_path: pathlib.Path):
+def _simple_concat(video_files: list, project_dir: pathlib.Path, final: pathlib.Path):
+    """简单拼接（无转场）作为 fallback。"""
+    concat_file = project_dir / "concat.txt"
+    with open(concat_file, "w") as f:
+        for vf in video_files:
+            f.write(f"file '{vf}'\n")
+    cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+           "-i", str(concat_file),
+           "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+           "-c:a", "aac", "-b:a", "128k", str(final)]
+    subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+
+
+def get_video_duration(path: pathlib.Path) -> float:
+    """用 ffprobe 获取视频时长。"""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json",
+             "-show_format", str(path)],
+            capture_output=True, text=True, timeout=10,
+        )
+        data = json.loads(result.stdout)
+        return float(data["format"]["duration"])
+    except Exception:
+        return 5.0  # fallback
+
+
+def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5):
     """从剧本生成 SRT 字幕。"""
     lines = []
     idx = 1
     current_time = 0.0
 
     for scene in script["scenes"]:
-        scene_duration = 5.0  # 每镜头 5 秒
+        sd = scene_duration
         dialogues = scene.get("dialogue", [])
         if not dialogues:
-            current_time += scene_duration
+            current_time += sd
             continue
 
         # 对白均匀分布在镜头时间中
-        per_dialogue = scene_duration / max(len(dialogues), 1)
+        per_dialogue = sd / max(len(dialogues), 1)
 
         for d in dialogues:
             char_name = d.get("character", "")
@@ -527,7 +607,7 @@ def generate_srt(script: dict, out_path: pathlib.Path):
             current_time = end
 
         # 如果还有剩余时间
-        remaining = scene_duration - (current_time - (start - per_dialogue * (len(dialogues) - 1)))
+        remaining = sd - (current_time - (start - per_dialogue * (len(dialogues) - 1)))
         if remaining > 0:
             current_time += remaining
 
@@ -600,10 +680,12 @@ def main():
     vid_manifest = generate_videos(
         client, script, sb_manifest,
         project_dir / "videos", cp, rl,
+        scene_duration=args.scene_duration,
     )
 
     # Step 5: 成片拼接
-    final = edit_final(project_dir, script, vid_manifest, cp)
+    final = edit_final(project_dir, script, vid_manifest, cp,
+                       scene_duration=args.scene_duration)
 
     if final:
         print(f"\n🎉 漫剧生成完成！")
