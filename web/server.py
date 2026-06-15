@@ -342,7 +342,8 @@ def api_test_config():
     try:
         import urllib.request
         import ssl
-        ctx = ssl.create_default_context()
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
         req = urllib.request.Request(
             "https://apihub.agnes-ai.com/v1/models",
             headers={"Authorization": f"Bearer {api_key}"},
