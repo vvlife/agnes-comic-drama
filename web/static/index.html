@@ -1437,12 +1437,10 @@ function pollAutoJob(jobId) {
       const job = await api(`/api/jobs/${jobId}`);
       const logs = job.logs || [];
       const logsEl = document.getElementById('auto-logs');
-      if (logsEl) logsEl.textContent = logs.slice(-30).join('
-');
+      if (logsEl) logsEl.textContent = logs.slice(-30).join('\n');
 
       // Parse logs to update steps
-      const logText = logs.join('
-');
+      const logText = logs.join('\n');
       if (logText.includes('步骤 1/5') || logText.includes('生成剧本')) setAutoStep(1, 'running');
       if (logText.includes('剧本生成完成') || logText.includes('✅ 剧本')) setAutoStep(1, 'done');
       if (logText.includes('步骤 2/5') || logText.includes('角色卡')) setAutoStep(2, 'running');
@@ -1499,18 +1497,15 @@ function pollJob(jobId, panelId, onComplete) {
       const job = await api(`/api/jobs/${jobId}`);
       const logs = job.logs || [];
       const logsEl = document.getElementById('job-logs');
-      if (logsEl) logsEl.textContent = logs.join('
-');
+      if (logsEl) logsEl.textContent = logs.join('\n');
 
       if (job.status === 'done') {
         clearInterval(interval);
-        panel.innerHTML = `<div class="job-status" style="color:var(--success)">✅ 完成</div><div class="job-logs">${logs.join('
-')}</div>`;
+        panel.innerHTML = `<div class="job-status" style="color:var(--success)">✅ 完成</div><div class="job-logs">${logs.join('\n')}</div>`;
         if (onComplete) onComplete();
       } else if (job.status === 'failed') {
         clearInterval(interval);
-        panel.innerHTML = `<div class="job-status" style="color:var(--error)">❌ 失败</div><div class="job-logs">${logs.join('
-')}</div>`;
+        panel.innerHTML = `<div class="job-status" style="color:var(--error)">❌ 失败</div><div class="job-logs">${logs.join('\n')}</div>`;
       }
     } catch (e) {
       clearInterval(interval);
