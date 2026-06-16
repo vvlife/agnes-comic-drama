@@ -266,6 +266,7 @@ def api_create_project():
     genre = body.get("genre", "仙侠")
     duration = int(body.get("duration", 15))
     scene_duration = int(body.get("scene_duration", 5))
+    n_scenes = int(body.get("n_scenes", 0)) or (duration // scene_duration)
     enable_tts = body.get("enable_tts", True)
     enable_sfx = body.get("enable_sfx", True)
 
@@ -285,7 +286,7 @@ def api_create_project():
         "scene_duration": scene_duration,
         "enable_tts": enable_tts,
         "enable_sfx": enable_sfx,
-        "n_scenes": duration // scene_duration,
+        "n_scenes": n_scenes,
         "created_at": time.time(),
     }
     (project_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
@@ -444,6 +445,25 @@ def api_get_characters(project_id: str):
 
     script = load_script(p)
     char_manifest = load_char_manifest(p)
+    char_dir = p / "characters"
+
+    # 如果 manifest 缺少角色但图片存在，自动修复
+    needs_fix = False
+    if script:
+        for char in script.get("characters", []):
+            cid = char["id"]
+            if cid not in char_manifest:
+                # 检查磁盘上是否有该角色的图片
+                char_images = []
+                for img_type in ["full", "close", "chibi"]:
+                    img_path = char_dir / f"{cid}_{img_type}.png"
+                    if img_path.exists():
+                        char_images.append(str(img_path))
+                if char_images:
+                    char_manifest[cid] = {"name": char.get("name", cid), "images": char_images}
+                    needs_fix = True
+    if needs_fix and char_dir.exists():
+        (char_dir / "manifest.json").write_text(json.dumps(char_manifest, ensure_ascii=False, indent=2))
 
     characters = []
     if script:
@@ -523,8 +543,10 @@ def api_generate_character(project_id: str, cid: str):
     char_manifest.pop(cid, None)
     (char_dir / "manifest.json").write_text(json.dumps(char_manifest, ensure_ascii=False, indent=2))
 
-    # 重置 characters checkpoint
+    # 不重置 characters checkpoint，仅重置该角色的 checkpoint
     cp = generator.Checkpoint(p)
+    # generate_characters 使用 "characters" 作为整体 checkpoint key
+    # 为了让单个角色能重新生成，需要重置整体 checkpoint
     cp.data.pop("characters", None)
     cp.path.write_text(json.dumps(cp.data, ensure_ascii=False, indent=2))
 
@@ -539,8 +561,8 @@ def api_generate_character(project_id: str, cid: str):
         "created_at": time.time(),
     }
 
-    # 构造只有该角色的 mini script
-    mini_script = {"characters": [char_info], "scenes": []}
+    # 传入完整脚本而非 mini_script，这样 generate_characters 会为所有角色生成
+    # 但因为其他角色的图已存在，它们会被跳过，只有当前角色会被重新生成
 
     def _run():
         jobs[job_id]["status"] = "running"
@@ -554,9 +576,9 @@ def api_generate_character(project_id: str, cid: str):
             meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
             style = meta.get("style", "三渲二国风")
 
-            # 直接调用 generate_characters，它会为 mini_script 中的角色生成图片
+            # 传入完整脚本，其他角色的已有图片会被跳过
             manifest = generator.generate_characters(
-                client, mini_script, style,
+                client, script, style,
                 char_dir, generator.Checkpoint(p), rl,
             )
             jobs[job_id]["status"] = "done"
@@ -1310,6 +1332,146 @@ def api_test_config():
                 return jsonify({"ok": False, "error": f"HTTP {resp.status}"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
+
+
+# ============================================================
+# 路由 — 自动模式（一键到底）
+# ============================================================
+
+@app.route("/api/projects/<project_id>/auto", methods=["POST"])
+def api_auto_run(project_id: str):
+    """自动模式：从脚本生成到成片拼接，全自动执行"""
+    p = validate_project(project_id)
+    if not p:
+        return jsonify({"error": "项目不存在"}), 404
+
+    # 重置所有 checkpoint
+    cp = generator.Checkpoint(p)
+    for key in ["script", "characters", "storyboard", "videos", "edit"]:
+        cp.data.pop(key, None)
+    keys_to_remove = [k for k in cp.data if k.startswith(("storyboard.", "videos."))]
+    for k in keys_to_remove:
+        cp.data.pop(k, None)
+    cp.path.write_text(json.dumps(cp.data, ensure_ascii=False, indent=2))
+
+    job_id = f"{project_id}_auto_{uuid.uuid4().hex[:6]}"
+    jobs[job_id] = {
+        "id": job_id,
+        "project_id": project_id,
+        "task_type": "auto",
+        "status": "pending",
+        "logs": [],
+        "result": None,
+        "created_at": time.time(),
+    }
+
+    def _run():
+        jobs[job_id]["status"] = "running"
+        def log(msg):
+            print(msg, flush=True)
+            jobs[job_id]["logs"].append(msg)
+        try:
+            meta_path = p / "meta.json"
+            meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+            theme = meta.get("theme", "未命名")
+            style = meta.get("style", "三渲二国风")
+            genre = meta.get("genre", "仙侠")
+            n_scenes = meta.get("n_scenes", 3)
+            scene_duration = meta.get("scene_duration", 5)
+            enable_tts = meta.get("enable_tts", True)
+            enable_sfx = meta.get("enable_sfx", True)
+
+            client, rl = get_client_and_rl()
+            cp = generator.Checkpoint(p)
+
+            # Step 1: Script
+            log(f"📝 步骤 1/5：生成剧本（{n_scenes} 个镜头）...")
+            script = generator.generate_script(
+                client, theme, style, genre,
+                n_scenes, scene_duration, rl,
+                p / "script.json", cp,
+            )
+            log(f"✅ 剧本生成完成：{script.get('title', '')}")
+
+            # Step 2: Characters
+            log(f"🎨 步骤 2/5：生成角色卡（{len(script.get('characters', []))} 个角色）...")
+            char_dir = p / "characters"
+            char_dir.mkdir(parents=True, exist_ok=True)
+            char_manifest = generator.generate_characters(
+                client, script, style, char_dir, cp, rl,
+            )
+            log(f"✅ 角色卡生成完成")
+
+            # Step 3: Storyboard
+            log(f"🖼️ 步骤 3/5：生成分镜关键帧（{len(script.get('scenes', []))} 个镜头）...")
+            sb_dir = p / "storyboard"
+            sb_dir.mkdir(parents=True, exist_ok=True)
+            sb_manifest = generator.generate_storyboard(
+                client, script, style, char_manifest,
+                sb_dir, cp, rl,
+            )
+            log(f"✅ 分镜关键帧生成完成")
+
+            # Step 4: Videos
+            log(f"📹 步骤 4/5：生成视频...")
+            vid_dir = p / "videos"
+            vid_dir.mkdir(parents=True, exist_ok=True)
+            vid_manifest = generator.generate_videos(
+                client, script, sb_manifest,
+                vid_dir, cp, rl,
+                scene_duration=scene_duration,
+            )
+            log(f"✅ 视频生成完成")
+
+            # Step 5: Edit + TTS/SFX
+            log(f"🎬 步骤 5/5：拼接成片...")
+            result = generator.edit_final(
+                p, script, vid_manifest, cp,
+                scene_duration=scene_duration,
+            )
+
+            # Optional TTS + SFX
+            if enable_tts or enable_sfx:
+                tts_manifest = {}
+                if enable_tts:
+                    log(f"🎙️ 生成 TTS 配音...")
+                    tts_manifest = generator.generate_tts(
+                        script, p / "audio", cp,
+                        scene_duration=scene_duration,
+                        vid_manifest=vid_manifest,
+                    )
+
+                sfx_manifest = {}
+                if enable_sfx:
+                    log(f"🔊 生成音效描述...")
+                    sfx_manifest = generator.generate_sfx(
+                        client, script, p / "sfx", cp, rl,
+                    )
+
+                if tts_manifest or sfx_manifest:
+                    log(f"🎚️ 混音...")
+                    final_with_audio = generator.mix_audio(
+                        p, script, tts_manifest, sfx_manifest, cp,
+                        scene_duration=scene_duration,
+                    )
+                    if final_with_audio:
+                        log(f"✅ 混音成片：{final_with_audio}")
+
+            if result:
+                jobs[job_id]["status"] = "done"
+                jobs[job_id]["result"] = str(result)
+                log(f"🎉 全流程完成！")
+            else:
+                jobs[job_id]["status"] = "failed"
+                log(f"❌ 成片拼接失败")
+        except Exception as e:
+            jobs[job_id]["status"] = "failed"
+            log(f"❌ 自动模式失败：{e}")
+            import traceback
+            traceback.print_exc()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"job_id": job_id, "status": "pending"})
 
 
 # ============================================================

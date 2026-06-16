@@ -71,7 +71,7 @@ header h1 {
   -webkit-text-fill-color: transparent;
 }
 header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
-.header-actions { position: absolute; top: 30px; right: 20px; }
+.header-actions { position: absolute; top: 30px; right: 20px; display:flex; gap:8px }
 .header-actions button {
   background: var(--surface2);
   color: var(--text2);
@@ -154,6 +154,11 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
   color: var(--text2);
   margin-bottom: 4px;
 }
+.form-hint {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 2px;
+}
 
 /* ===== Buttons ===== */
 .btn-primary {
@@ -196,6 +201,7 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
   min-height: 120px;
   align-items: center;
   justify-content: center;
+  flex-wrap: wrap;
 }
 .char-images img {
   max-height: 140px;
@@ -297,6 +303,7 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
   line-height: 1.6;
   color: var(--text2);
   margin-top: 8px;
+  white-space: pre-wrap;
 }
 .job-status {
   display: flex;
@@ -373,26 +380,39 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
 .empty-icon { font-size: 48px; margin-bottom: 12px; }
 .empty p { margin-bottom: 16px; }
 
-/* ===== Scene Edit Form ===== */
-.edit-dialogue {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* ===== Auto Mode Progress ===== */
+.auto-progress {
+  margin-top: 16px;
+  background: var(--surface2);
+  border-radius: 12px;
+  padding: 16px;
 }
-.dialogue-line {
+.auto-step {
   display: flex;
-  gap: 6px;
   align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  font-size: 14px;
 }
-.dialogue-line input { flex: 1; }
-.dialogue-line button { flex-shrink: 0; }
-
-/* ===== Responsive ===== */
-@media (max-width: 768px) {
-  .char-grid { grid-template-columns: 1fr; }
-  .scene-row { flex-wrap: wrap; }
-  .scene-thumb, .scene-video { width: 80px; min-height: 100px; }
-  .form-row { flex-direction: column; }
+.auto-step .step-icon { font-size: 18px; }
+.auto-step .step-text { flex: 1; }
+.auto-step.pending { color: var(--text3); }
+.auto-step.running { color: var(--accent2); }
+.auto-step.done { color: var(--success); }
+.auto-step.failed { color: var(--error); }
+.auto-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--surface3);
+  border-radius: 3px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+.auto-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.5s;
 }
 
 /* ===== Scrollbar ===== */
@@ -408,6 +428,7 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
     <h1>🎭 Agnes 漫剧生成器</h1>
     <p>免费 AI 漫剧 · 脚本 → 角色 → 成片</p>
     <div class="header-actions">
+      <button onclick="openAutoModal()" style="background:var(--accent);color:white">🚀 自动模式</button>
       <button onclick="openProjectsModal()">📂 项目</button>
       <button onclick="openSettingsModal()">⚙️ 设置</button>
     </div>
@@ -457,13 +478,18 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
         <div class="form-row">
           <div class="form-group" style="max-width:100px">
             <label>总时长(秒)</label>
-            <input id="s-duration" type="number" value="15" min="5" max="300">
+            <input id="s-duration" type="number" value="15" min="5" max="300" oninput="onScriptParamChange()">
           </div>
           <div class="form-group" style="max-width:100px">
             <label>单镜头(秒)</label>
-            <select id="s-scene-dur">
+            <select id="s-scene-dur" onchange="onScriptParamChange()">
               <option value="5">5</option><option value="10">10</option><option value="15">15</option>
             </select>
+          </div>
+          <div class="form-group" style="max-width:100px">
+            <label>镜头数</label>
+            <input id="s-scene-count" type="number" value="3" min="1" max="20" oninput="onSceneCountChange()">
+            <div class="form-hint" id="s-scene-count-hint">= 总时长 / 单镜头</div>
           </div>
           <div class="form-group" style="max-width:80px; display:flex; align-items:flex-end">
             <button class="btn-primary" id="btn-gen-script" onclick="generateScript()">✨ 生成脚本</button>
@@ -595,13 +621,18 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
     <div class="form-row">
       <div class="form-group">
         <label>总时长(秒)</label>
-        <input id="np-duration" type="number" value="15" min="5" max="300">
+        <input id="np-duration" type="number" value="15" min="5" max="300" oninput="onNpParamChange()">
       </div>
       <div class="form-group">
         <label>单镜头(秒)</label>
-        <select id="np-scenedur">
+        <select id="np-scenedur" onchange="onNpParamChange()">
           <option value="5">5</option><option value="10">10</option><option value="15">15</option>
         </select>
+      </div>
+      <div class="form-group">
+        <label>镜头数</label>
+        <input id="np-scenecount" type="number" value="3" min="1" max="20">
+        <div class="form-hint" id="np-scenecount-hint"></div>
       </div>
     </div>
     <div style="display:flex; gap:8px; margin-top:12px">
@@ -667,21 +698,111 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
   </div>
 </div>
 
+<!-- Auto Mode Modal -->
+<div class="modal-overlay" id="modal-auto">
+  <div class="modal" style="max-width:520px">
+    <h2>🚀 自动模式</h2>
+    <p style="color:var(--text2); font-size:13px; margin-bottom:16px">输入主题，自动执行全部步骤：生成脚本 → 角色卡 → 分镜 → 视频 → 成片</p>
+    <div class="form-group">
+      <label>主题</label>
+      <input id="auto-theme" placeholder="如：少年剑仙归来" onkeydown="if(event.key===&apos;Enter&apos;) startAutoMode()">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>风格</label>
+        <select id="auto-style">
+          <option>三渲二国风</option><option>水墨</option><option>赛博朋克</option><option>日系动漫</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>类型</label>
+        <select id="auto-genre">
+          <option>仙侠</option><option>宫斗</option><option>江湖</option><option>都市</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>总时长(秒)</label>
+        <input id="auto-duration" type="number" value="15" min="5" max="300" oninput="onAutoParamChange()">
+      </div>
+      <div class="form-group">
+        <label>单镜头(秒)</label>
+        <select id="auto-scenedur" onchange="onAutoParamChange()">
+          <option value="5" selected>5</option><option value="10">10</option><option value="15">15</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>镜头数</label>
+        <input id="auto-scenecount" type="number" value="3" min="1" max="20">
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:12px">
+      <button class="btn-primary" id="btn-start-auto" onclick="startAutoMode()">🚀 开始生成</button>
+      <button class="btn-secondary" onclick="closeModal(&apos;modal-auto&apos;)">取消</button>
+    </div>
+    <div class="auto-progress" id="auto-progress" style="display:none">
+      <div class="auto-step" id="auto-step1"><span class="step-icon">⏳</span><span class="step-text">生成脚本...</span></div>
+      <div class="auto-step" id="auto-step2"><span class="step-icon">⏳</span><span class="step-text">生成角色卡...</span></div>
+      <div class="auto-step" id="auto-step3"><span class="step-icon">⏳</span><span class="step-text">生成分镜...</span></div>
+      <div class="auto-step" id="auto-step4"><span class="step-icon">⏳</span><span class="step-text">生成视频...</span></div>
+      <div class="auto-step" id="auto-step5"><span class="step-icon">⏳</span><span class="step-text">拼接成片...</span></div>
+      <div class="auto-bar"><div class="auto-bar-fill" id="auto-bar-fill" style="width:0%"></div></div>
+      <div id="auto-logs" class="job-logs" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== State =====
-let currentProject = null;  // project_id
+let currentProject = null;
 let script = null;
 let meta = null;
 let charManifest = {};
 let sbManifest = {};
-let activeJobs = {};  // job_id -> {panel, pollFn}
+let activeJobs = {};
 
 const API = '';
 
+// ===== Scene count calculation =====
+function calcSceneCount(duration, sceneDur) {
+  return Math.max(1, Math.round(duration / sceneDur));
+}
+
+function onScriptParamChange() {
+  const dur = parseInt(document.getElementById('s-duration').value) || 15;
+  const sd = parseInt(document.getElementById('s-scene-dur').value) || 5;
+  const cnt = calcSceneCount(dur, sd);
+  document.getElementById('s-scene-count').value = cnt;
+  document.getElementById('s-scene-count-hint').textContent = `= ${dur}s / ${sd}s`;
+}
+
+function onSceneCountChange() {
+  // User manually set scene count - update hint
+  const dur = parseInt(document.getElementById('s-duration').value) || 15;
+  const sd = parseInt(document.getElementById('s-scene-dur').value) || 5;
+  const cnt = parseInt(document.getElementById('s-scene-count').value) || 3;
+  document.getElementById('s-scene-count-hint').textContent = `= ${dur}s / ${sd}s = ${cnt} 镜头`;
+}
+
+function onNpParamChange() {
+  const dur = parseInt(document.getElementById('np-duration').value) || 15;
+  const sd = parseInt(document.getElementById('np-scenedur').value) || 5;
+  const cnt = calcSceneCount(dur, sd);
+  document.getElementById('np-scenecount').value = cnt;
+  document.getElementById('np-scenecount-hint').textContent = `= ${dur}s / ${sd}s`;
+}
+
+function onAutoParamChange() {
+  const dur = parseInt(document.getElementById('auto-duration').value) || 15;
+  const sd = parseInt(document.getElementById('auto-scenedur').value) || 5;
+  const cnt = calcSceneCount(dur, sd);
+  document.getElementById('auto-scenecount').value = cnt;
+}
+
 // ===== API helpers =====
 async function api(path, opts = {}) {
-  const url = API + path;
-  const res = await fetch(url, {
+  const res = await fetch(API + path, {
     headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
     method: opts.method || 'GET',
     body: opts.body ? JSON.stringify(opts.body) : undefined,
@@ -729,6 +850,7 @@ function testApiKey() {
 
 function openNewProjectModal() {
   document.getElementById('np-theme').value = '';
+  onNpParamChange();
   openModal('modal-newproject');
 }
 
@@ -739,7 +861,7 @@ function openProjectsModal() {
       el.innerHTML = '<div class="empty" style="padding:30px"><p>暂无项目</p></div>';
     } else {
       el.innerHTML = data.projects.map(p => `
-        <div class="project-item" onclick="loadProject('${p.id}')">
+        <div class="project-item" onclick="loadProject(&apos;${p.id}&apos;)">
           <div>
             <div class="project-title">${p.title || p.id}</div>
             <div class="project-meta">${new Date(p.modified*1000).toLocaleString('zh-CN')}</div>
@@ -751,7 +873,7 @@ function openProjectsModal() {
             ${p.has_videos ? '<span class="badge badge-yes">视频</span>' : '<span class="badge badge-no">视频</span>'}
             ${p.has_final ? '<span class="badge badge-yes">成片</span>' : '<span class="badge badge-no">成片</span>'}
           </div>
-          <button class="btn-danger btn-small" onclick="event.stopPropagation();deleteProject('${p.id}')">🗑</button>
+          <button class="btn-danger btn-small" onclick="event.stopPropagation();deleteProject(&apos;${p.id}&apos;)">🗑</button>
         </div>
       `).join('');
     }
@@ -769,6 +891,7 @@ async function createProject() {
     genre: document.getElementById('np-genre').value,
     duration: parseInt(document.getElementById('np-duration').value) || 15,
     scene_duration: parseInt(document.getElementById('np-scenedur').value) || 5,
+    n_scenes: parseInt(document.getElementById('np-scenecount').value) || 3,
     enable_tts: true,
     enable_sfx: true,
   };
@@ -790,7 +913,6 @@ async function loadProject(projectId) {
     charManifest = {};
     sbManifest = {};
 
-    // Update script panel
     document.getElementById('script-empty').style.display = 'none';
     document.getElementById('script-editor').style.display = 'block';
     document.getElementById('s-theme').value = meta.theme || '';
@@ -798,6 +920,10 @@ async function loadProject(projectId) {
     document.getElementById('s-genre').value = meta.genre || '仙侠';
     document.getElementById('s-duration').value = meta.duration || 15;
     document.getElementById('s-scene-dur').value = String(meta.scene_duration || 5);
+    // Set scene count
+    const nScenes = meta.n_scenes || calcSceneCount(meta.duration || 15, meta.scene_duration || 5);
+    document.getElementById('s-scene-count').value = nScenes;
+    document.getElementById('s-scene-count-hint').textContent = `= ${(meta.duration || 15)}s / ${meta.scene_duration || 5}s = ${nScenes} 镜头`;
 
     if (script) {
       renderScriptEditor();
@@ -841,6 +967,15 @@ async function generateScript() {
 async function loadScriptData() {
   try {
     script = await api(`/api/projects/${currentProject}/script`);
+    // Update n_scenes in meta to match actual script
+    if (script && script.scenes) {
+      const ms = await api(`/api/projects/${currentProject}`);
+      meta = ms.meta || meta;
+      if (meta) {
+        meta.n_scenes = script.scenes.length;
+        await api(`/api/projects/${currentProject}/meta`, { method: 'PUT', body: meta });
+      }
+    }
     renderScriptEditor();
   } catch (e) { /* no script yet */ }
 }
@@ -1019,15 +1154,14 @@ async function refreshCharacters() {
 
   try {
     const data = await api(`/api/projects/${currentProject}/characters`);
-    charManifest = {};
     const grid = document.getElementById('char-grid');
+    // Build image HTML for each character
     grid.innerHTML = data.characters.map(c => {
-      charManifest[c.id] = c;
-      const imgs = (c.images || []).map(url => `<img src="${url}" alt="${c.name}">`).join('');
+      const imgs = (c.images || []).map(url => `<img src="${url}" alt="${c.name}" loading="lazy">`).join('');
       return `
         <div class="char-card">
           <div class="char-images">
-            ${imgs || '<div class="no-img">暂无图片</div>'}
+            ${imgs || '<div class="no-img">暂无图片<br><small>点击"生成图片"按钮</small></div>'}
           </div>
           <div class="char-info">
             <h3>${c.id} · ${c.name}</h3>
@@ -1045,19 +1179,20 @@ async function refreshCharacters() {
 
 async function generateAllCharacters() {
   if (!currentProject || !script) return;
-  // Generate one by one
-  for (const c of (script.characters || [])) {
-    await generateCharImages(c.id, true);
+  const chars = script.characters || [];
+  if (!chars.length) return alert('请先在脚本中添加角色');
+  // Generate sequentially to avoid overwhelming the API
+  for (const c of chars) {
+    await generateCharImages(c.id);
   }
-  refreshCharacters();
 }
 
-async function generateCharImages(cid, silent = false) {
+async function generateCharImages(cid) {
   if (!currentProject) return;
   try {
     const data = await api(`/api/projects/${currentProject}/characters/${cid}/generate`, { method: 'POST' });
     pollJob(data.job_id, 'chars-job', () => refreshCharacters());
-  } catch (e) { if (!silent) alert('生成失败：' + e.message); }
+  } catch (e) { alert('生成失败：' + e.message); }
 }
 
 function editCharacterByName(cid) {
@@ -1083,7 +1218,7 @@ async function refreshProduction() {
   timeline.innerHTML = (script.scenes || []).map((s, i) => {
     const sbInfo = sbManifest[s.id] || {};
     const sbImg = sbInfo.path ? `${projUrl}storyboard/${s.id}.png` : '';
-    const vidPath = `${projUrl}videos/${s.id}.mp4`;
+    const vidUrl = `${projUrl}videos/${s.id}.mp4`;
     const dialogue = (s.dialogue || []).map(d => {
       const charName = (script.characters || []).find(c => c.id === d.character)?.name || d.character;
       return `${charName}：${d.text}`;
@@ -1092,7 +1227,7 @@ async function refreshProduction() {
     return `
       <div class="scene-row" draggable="true" data-sid="${s.id}"
            ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="dropScene(event)">
-        <div class="scene-order">⠿<br><span>#${i+1}</span></div>
+        <div class="scene-order">⋮<br><span>#${i+1}</span></div>
         <div class="scene-thumb">
           ${sbImg ? `<img src="${sbImg}" alt="${s.id}" loading="lazy">` : '<div class="no-thumb">无分镜</div>'}
         </div>
@@ -1110,7 +1245,7 @@ async function refreshProduction() {
         </div>
         <div class="scene-video">
           <div class="no-video" id="vid-status-${s.id}">
-            <button class="btn-secondary btn-small" onclick="checkVideo('${s.id}')">检查</button>
+            <button class="btn-secondary btn-small" onclick="checkVideo('${s.id}')">检查视频</button>
           </div>
         </div>
       </div>
@@ -1141,7 +1276,6 @@ function checkFinal() {
   const vid = document.getElementById('final-video');
   const dl = document.getElementById('final-download');
 
-  // Try with audio first, then without
   const urls = [
     `${API}/api/project-files/${currentProject}/final_with_audio.mp4`,
     `${API}/api/project-files/${currentProject}/final.mp4`,
@@ -1171,7 +1305,6 @@ function dropScene(e) {
   e.currentTarget.classList.remove('dragging');
   const targetSid = e.currentTarget.dataset.sid;
   if (!dragSid || dragSid === targetSid) return;
-  // Reorder in script
   const order = script.scenes.map(s => s.id);
   const fromIdx = order.indexOf(dragSid);
   const toIdx = order.indexOf(targetSid);
@@ -1222,19 +1355,6 @@ async function generateVideoScene(sid) {
 
 async function renderFinal() {
   if (!currentProject) return;
-  // Update TTS/SFX settings
-  try {
-    const projData = await api(`/api/projects/${currentProject}`);
-    if (projData.meta) {
-      projData.meta.enable_tts = document.getElementById('prod-tts').checked;
-      projData.meta.enable_sfx = document.getElementById('prod-sfx').checked;
-      // Save back meta
-      const metaPath = `/api/projects/${currentProject}`;
-      // We need a meta update endpoint - use project create with same ID or just save directly
-      // For now, just proceed with render
-    }
-  } catch (e) { /* ignore */ }
-
   try {
     const data = await api(`/api/projects/${currentProject}/render`, { method: 'POST' });
     pollJob(data.job_id, 'prod-job', () => refreshProduction());
@@ -1253,6 +1373,121 @@ async function deleteSceneBySid(sid) {
   refreshProduction();
 }
 
+// ===== Auto Mode =====
+function openAutoModal() {
+  document.getElementById('auto-theme').value = '';
+  document.getElementById('auto-progress').style.display = 'none';
+  ['auto-step1','auto-step2','auto-step3','auto-step4','auto-step5'].forEach(id => {
+    const el = document.getElementById(id);
+    el.className = 'auto-step pending';
+    el.querySelector('.step-icon').textContent = '⏳';
+  });
+  document.getElementById('auto-bar-fill').style.width = '0%';
+  document.getElementById('btn-start-auto').disabled = false;
+  onAutoParamChange();
+  openModal('modal-auto');
+}
+
+async function startAutoMode() {
+  const theme = document.getElementById('auto-theme').value.trim();
+  if (!theme) return alert('请输入主题');
+
+  const style = document.getElementById('auto-style').value;
+  const genre = document.getElementById('auto-genre').value;
+  const duration = parseInt(document.getElementById('auto-duration').value) || 15;
+  const sceneDur = parseInt(document.getElementById('auto-scenedur').value) || 5;
+  const nScenes = parseInt(document.getElementById('auto-scenecount').value) || 3;
+
+  // Create project
+  const body = {
+    theme, style, genre,
+    duration, scene_duration: sceneDur, n_scenes: nScenes,
+    enable_tts: true, enable_sfx: true,
+  };
+
+  const proj = await api('/api/projects', { method: 'POST', body });
+  currentProject = proj.id;
+
+  // Show progress
+  document.getElementById('auto-progress').style.display = '';
+  document.getElementById('btn-start-auto').disabled = true;
+
+  // Start auto job
+  try {
+    const data = await api(`/api/projects/${currentProject}/auto`, { method: 'POST' });
+    pollAutoJob(data.job_id);
+  } catch (e) {
+    alert('启动失败：' + e.message);
+    document.getElementById('btn-start-auto').disabled = false;
+  }
+}
+
+function setAutoStep(step, status) {
+  const el = document.getElementById(`auto-step${step}`);
+  el.className = `auto-step ${status}`;
+  const icon = el.querySelector('.step-icon');
+  if (status === 'running') icon.textContent = '⏳';
+  else if (status === 'done') icon.textContent = '✅';
+  else if (status === 'failed') icon.textContent = '❌';
+}
+
+function pollAutoJob(jobId) {
+  const interval = setInterval(async () => {
+    try {
+      const job = await api(`/api/jobs/${jobId}`);
+      const logs = job.logs || [];
+      const logsEl = document.getElementById('auto-logs');
+      if (logsEl) logsEl.textContent = logs.slice(-30).join('
+');
+
+      // Parse logs to update steps
+      const logText = logs.join('
+');
+      if (logText.includes('步骤 1/5') || logText.includes('生成剧本')) setAutoStep(1, 'running');
+      if (logText.includes('剧本生成完成') || logText.includes('✅ 剧本')) setAutoStep(1, 'done');
+      if (logText.includes('步骤 2/5') || logText.includes('角色卡')) setAutoStep(2, 'running');
+      if (logText.includes('角色卡生成完成') || logText.includes('✅ 角色卡')) setAutoStep(2, 'done');
+      if (logText.includes('步骤 3/5') || logText.includes('分镜')) setAutoStep(3, 'running');
+      if (logText.includes('分镜关键帧生成完成') || logText.includes('✅ 分镜')) setAutoStep(3, 'done');
+      if (logText.includes('步骤 4/5') || logText.includes('视频')) setAutoStep(4, 'running');
+      if (logText.includes('视频生成完成') || logText.includes('✅ 视频')) setAutoStep(4, 'done');
+      if (logText.includes('步骤 5/5') || logText.includes('拼接成片')) setAutoStep(5, 'running');
+      if (logText.includes('全流程完成') || logText.includes('🎉 全流程')) setAutoStep(5, 'done');
+
+      // Update progress bar
+      let doneCount = 0;
+      for (let i = 1; i <= 5; i++) {
+        const el = document.getElementById(`auto-step${i}`);
+        if (el.classList.contains('done')) doneCount++;
+      }
+      document.getElementById('auto-bar-fill').style.width = `${(doneCount / 5) * 100}%`;
+
+      if (job.status === 'done') {
+        clearInterval(interval);
+        setAutoStep(5, 'done');
+        document.getElementById('auto-bar-fill').style.width = '100%';
+        // Load project and switch to production tab
+        setTimeout(() => {
+          closeModal('modal-auto');
+          loadProject(currentProject);
+          switchTab(2);
+        }, 1000);
+      } else if (job.status === 'failed') {
+        clearInterval(interval);
+        for (let i = 1; i <= 5; i++) {
+          const el = document.getElementById(`auto-step${i}`);
+          if (!el.classList.contains('done') && !el.classList.contains('failed')) {
+            setAutoStep(i, 'failed');
+          }
+        }
+        document.getElementById('btn-start-auto').disabled = false;
+      }
+    } catch (e) {
+      clearInterval(interval);
+    }
+  }, 2000);
+}
+
 // ===== Job Polling =====
 function pollJob(jobId, panelId, onComplete) {
   const panel = document.getElementById(panelId);
@@ -1264,15 +1499,18 @@ function pollJob(jobId, panelId, onComplete) {
       const job = await api(`/api/jobs/${jobId}`);
       const logs = job.logs || [];
       const logsEl = document.getElementById('job-logs');
-      if (logsEl) logsEl.textContent = logs.join('\n');
+      if (logsEl) logsEl.textContent = logs.join('
+');
 
       if (job.status === 'done') {
         clearInterval(interval);
-        panel.innerHTML = `<div class="job-status" style="color:var(--success)">✅ 完成</div><div class="job-logs">${logs.join('\n')}</div>`;
+        panel.innerHTML = `<div class="job-status" style="color:var(--success)">✅ 完成</div><div class="job-logs">${logs.join('
+')}</div>`;
         if (onComplete) onComplete();
       } else if (job.status === 'failed') {
         clearInterval(interval);
-        panel.innerHTML = `<div class="job-status" style="color:var(--error)">❌ 失败</div><div class="job-logs">${logs.join('\n')}</div>`;
+        panel.innerHTML = `<div class="job-status" style="color:var(--error)">❌ 失败</div><div class="job-logs">${logs.join('
+')}</div>`;
       }
     } catch (e) {
       clearInterval(interval);
@@ -1282,10 +1520,9 @@ function pollJob(jobId, panelId, onComplete) {
 
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', () => {
-  // Check if there's a recent project to auto-load
+  onScriptParamChange();
   api('/api/projects').then(data => {
     if (data.projects && data.projects.length > 0) {
-      // Auto-load the most recent project
       loadProject(data.projects[0].id);
     }
   }).catch(() => {});
