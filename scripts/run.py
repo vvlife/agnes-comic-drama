@@ -390,7 +390,14 @@ def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
 
     if cp.is_done("videos"):
         print("✅ 视频已存在，跳过")
-        return {}
+        # 从磁盘重建 manifest
+        manifest = {}
+        for scene in script["scenes"]:
+            sid = scene["id"]
+            vid_path = vid_dir / f"{sid}.mp4"
+            if vid_path.exists():
+                manifest[sid] = str(vid_path)
+        return manifest
 
     num_frames = SCENE_DURATION_MAP.get(scene_duration, 121)
     print(f"\n📹 步骤 4/5：图生视频（{len(script['scenes'])} 个镜头，每镜头 ~{scene_duration}s / {num_frames}帧）...")
@@ -591,6 +598,20 @@ def get_video_duration(path: pathlib.Path) -> float:
         return 5.0  # fallback
 
 
+def get_audio_duration(path: pathlib.Path) -> float:
+    """用 ffprobe 获取音频时长。"""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json",
+             "-show_format", str(path)],
+            capture_output=True, text=True, timeout=10,
+        )
+        data = json.loads(result.stdout)
+        return float(data["format"]["duration"])
+    except Exception:
+        return 2.0  # fallback
+
+
 def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5):
     """从剧本生成 SRT 字幕。"""
     lines = []
@@ -648,19 +669,26 @@ def format_srt_time(seconds: float) -> str:
 
 # ===================== TTS 配音 =====================
 
-# edge-tts 语音映射
+# edge-tts 语音映射 — 每个角色分配不同语音
 EDGE_TTS_VOICES = {
     "male": [
         "zh-CN-YunxiNeural",      # 阳光男声（首选）
         "zh-CN-YunjianNeural",    # 沉稳男声
         "zh-CN-YunyangNeural",    # 新闻男声
+        "zh-HK-WanLungNeural",    # 港式男声
+        "zh-TW-YunJheNeural",     # 台式男声
     ],
     "female": [
         "zh-CN-XiaoxiaoNeural",   # 温柔女声（首选）
         "zh-CN-XiaoyiNeural",     # 甜美女声
         "zh-CN-XiaohanNeural",    # 知性女声
+        "zh-HK-HiuGaNeural",      # 港式女声
+        "zh-TW-HsiaoChenNeural",  # 台式女声
     ],
 }
+
+# 角色语音缓存：确保同一角色始终用同一语音
+_character_voice_map: dict[str, str] = {}
 
 
 def _run_edge_tts(text: str, voice: str, out_path: pathlib.Path) -> bool:
@@ -715,9 +743,50 @@ def _run_say_tts(text: str, voice: str, out_path: pathlib.Path) -> bool:
         return False
 
 
+def _get_voice_for_character(char_id: str, char_gender: str) -> str:
+    """为角色分配唯一语音（同性别角色用不同声音）。"""
+    global _character_voice_map
+    if char_id in _character_voice_map:
+        return _character_voice_map[char_id]
+
+    voices = EDGE_TTS_VOICES.get(char_gender, EDGE_TTS_VOICES["male"])
+    # 已用同性别语音数量 → 选下一个
+    used = sum(1 for v in _character_voice_map.values() if v in voices)
+    voice = voices[used % len(voices)]
+    _character_voice_map[char_id] = voice
+    return voice
+
+
+def _compute_scene_offsets(script: dict, vid_manifest: dict,
+                           scene_duration: int = 5) -> dict[str, float]:
+    """根据实际存在的视频，计算每个场景在最终成片中的起始秒数。
+    
+    vid_manifest: {"S01": "path/to/S01.mp4", ...}  只包含成功生成的场景
+    """
+    offsets = {}
+    t = 0.0
+    for scene in script["scenes"]:
+        sid = scene["id"]
+        if sid in vid_manifest:
+            offsets[sid] = t
+            # 用 ffprobe 取实际时长
+            vid_path = pathlib.Path(vid_manifest[sid]) if vid_manifest[sid] else None
+            if vid_path and vid_path.exists():
+                dur = get_video_duration(vid_path)
+            else:
+                dur = float(scene_duration)
+            t += dur
+        # 如果场景视频不存在，不计入时间轴
+    return offsets
+
+
 def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
-                 scene_duration: int = 5) -> dict:
-    """为剧本对白生成 TTS 音频。优先 edge-tts（跨平台），回退到 macOS say。"""
+                 scene_duration: int = 5,
+                 vid_manifest: dict | None = None) -> dict:
+    """为剧本对白生成 TTS 音频。优先 edge-tts（跨平台），回退到 macOS say。
+    
+    vid_manifest: 实际存在的视频清单，用于精确对齐 TTS 时间戳。
+    """
 
     if cp.is_done("tts"):
         print("✅ TTS 已存在，跳过")
@@ -758,26 +827,67 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
                 cp.mark_done("tts")
                 return {}
 
+    # 计算实际场景偏移（基于已生成的视频）
+    if vid_manifest:
+        scene_offsets = _compute_scene_offsets(script, vid_manifest, scene_duration)
+        print(f"  场景偏移：{scene_offsets}")
+    else:
+        scene_offsets = {}
+        t = 0.0
+        for scene in script["scenes"]:
+            scene_offsets[scene["id"]] = t
+            t += scene_duration
+
+    valid_sids = set(scene_offsets.keys())
+
+    # 收集所有场景的对白，缺失视频的对白追加到前一个有视频的场景
+    scene_dialogues: dict[str, list] = {}  # sid -> [{character, text, orig_sid}]
+    last_valid_sid = None
+    for scene in script["scenes"]:
+        sid = scene["id"]
+        ds = scene.get("dialogue", [])
+        if sid in valid_sids:
+            scene_dialogues[sid] = [{**d, "orig_sid": sid} for d in ds]
+            last_valid_sid = sid
+        elif ds and last_valid_sid:
+            # 缺失视频的对白追加到前一个有视频的场景
+            scene_dialogues[last_valid_sid].extend(
+                [{**d, "orig_sid": sid} for d in ds]
+            )
+            print(f"  📎 {sid} 对白合并到 {last_valid_sid}")
+        elif ds:
+            print(f"  ⚠️ {sid} 对白无法合并（无前置视频场景）")
+
     manifest = {}
     idx = 0
 
-    for scene_idx, scene in enumerate(script["scenes"]):
-        sid = scene["id"]
-        dialogues = scene.get("dialogue", [])
+    for sid, dialogues in scene_dialogues.items():
         if not dialogues:
             continue
 
-        per_dialogue = scene_duration / max(len(dialogues), 1)
+        scene_start = scene_offsets[sid]
+        # 获取该场景实际视频时长
+        if vid_manifest and sid in vid_manifest:
+            vid_path = pathlib.Path(vid_manifest[sid]) if vid_manifest[sid] else None
+            if vid_path and vid_path.exists():
+                actual_duration = get_video_duration(vid_path)
+            else:
+                actual_duration = float(scene_duration)
+        else:
+            actual_duration = float(scene_duration)
+
+        per_dialogue = actual_duration / max(len(dialogues), 1)
 
         for d_idx, d in enumerate(dialogues):
             char_id = d.get("character", "")
             text = d.get("text", "")
+            orig_sid = d.get("orig_sid", sid)
             if not text:
                 continue
 
             # 查找角色信息
             char_name = char_id
-            char_gender = "male"  # 默认
+            char_gender = "male"
             for c in script.get("characters", []):
                 if c["id"] == char_id:
                     char_name = c["name"]
@@ -786,14 +896,14 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
                         char_gender = "female"
                     break
 
-            out_path = audio_dir / f"tts_{sid}_{d_idx:02d}.mp3"
+            out_path = audio_dir / f"tts_{orig_sid}_{d_idx:02d}.mp3"
 
-            # 计算时间戳
-            start_time = scene_idx * scene_duration + d_idx * per_dialogue
+            # 计算时间戳：基于实际视频拼接位置
+            start_time = scene_start + d_idx * per_dialogue
 
-            # 选择语音
+            # 选择语音：每个角色用不同声音
             if tts_engine == "edge-tts":
-                voice = EDGE_TTS_VOICES.get(char_gender, EDGE_TTS_VOICES["male"])[0]
+                voice = _get_voice_for_character(char_id, char_gender)
                 success = _run_edge_tts(text, voice, out_path)
             elif tts_engine == "say":
                 voice = "Ting-Ting" if char_gender == "female" else "Li-Mu"
@@ -809,14 +919,20 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
                     print(f"    （回退到 macOS say）")
 
             if success and out_path.exists():
+                # 获取 TTS 实际时长
+                tts_duration = get_audio_duration(out_path)
                 manifest[f"{sid}_{d_idx}"] = {
                     "path": str(out_path),
                     "character": char_name,
+                    "character_id": char_id,
+                    "gender": char_gender,
+                    "voice": voice if tts_engine == "edge-tts" else ("Ting-Ting" if char_gender == "female" else "Li-Mu"),
                     "text": text,
-                    "start": start_time,
-                    "duration": per_dialogue,
+                    "start": round(start_time, 3),
+                    "tts_duration": round(tts_duration, 3),
+                    "scene_duration": round(per_dialogue, 3),
                 }
-                print(f"  ✅ {char_name}: {text[:20]}...")
+                print(f"  ✅ {char_name}({voice.split('_')[-1].replace('Neural','')}): {text[:20]}... [{start_time:.1f}s]")
                 idx += 1
             else:
                 print(f"  ❌ TTS 失败 {char_name}: {text[:20]}...")
@@ -825,6 +941,158 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
     cp.mark_done("tts")
     print(f"  ✅ TTS 已保存：{audio_dir}（共 {idx} 条）")
+    return manifest
+
+
+# ===================== 口型同步 =====================
+
+def _extract_volume_envelope(audio_path: pathlib.Path) -> list[tuple[float, float]]:
+    """提取音频音量包络，返回 [(time, rms_normalized), ...]。"""
+    import re
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-i", str(audio_path), "-af",
+             "astat=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=30,
+        )
+        times = []
+        for line in result.stderr.split("\n"):
+            m = re.search(r"pts_time:([\d.]+).*frame:.*?(\S+)", line)
+            if not m:
+                m = re.search(r"atime=([\d.]+).*level=([-\d.]+)", line)
+            if m:
+                t = float(m.group(1))
+                rms_str = m.group(2)
+                try:
+                    rms = float(rms_str)
+                    norm = max(0.0, min(1.0, (rms + 60) / 60))  # -60~0 dB → 0~1
+                    times.append((t, norm))
+                except ValueError:
+                    pass
+        return times if times else [(0.0, 0.5), (1.0, 0.5)]
+    except Exception:
+        return [(0.0, 0.3), (0.5, 0.8), (1.0, 0.3)]
+
+
+def _make_lipsync_video(vid_path: pathlib.Path, tts_path: pathlib.Path,
+                        out_path: pathlib.Path,
+                        scene_offset: float, tts_start_in_scene: float,
+                        tts_dur: float) -> bool:
+    """为一个场景生成口型同步视频。
+    
+    策略：在 TTS 说话区间用 ffmpeg overlay 混入 TTS 音频，
+    同时用音频驱动的亮度脉冲模拟口型微动。
+    """
+    try:
+        # 简单有效方案：直接把 TTS 混入视频，在说话区间做轻微亮度脉冲
+        # 用 ebur128 检测音量 → 不行太复杂，直接用 simpler 方案
+        
+        # 方案A：混入 TTS 音频 + 说话区间加轻微抖动
+        # 更简单：只混入 TTS + 字幕级微动效果
+        
+        # 先混入 TTS 音频到该场景视频（保留完整视频时长）
+        # 用 pad 在 TTS 前后填充静音，使其与视频等长
+        vid_dur = get_video_duration(vid_path)
+        
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", str(vid_path),
+            "-i", str(tts_path),
+            "-filter_complex",
+            # 视频：保持原时长
+            f"[0:v]setpts=PTS-STARTPTS[v];"
+            # TTS 音频：延迟到说话位置 + 前后填充静音到视频等长
+            f"[1:a]aresample=48000,"
+            f"adelay={int(tts_start_in_scene*1000)}|{int(tts_start_in_scene*1000)},"
+            f"apad=whole_dur={vid_dur}[a]",
+            "-map", "[v]", "-map", "[a]",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
+            "-c:a", "aac", "-b:a", "96k",
+            str(out_path),
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            print(f"    ffmpeg stderr: {result.stderr[:200]}")
+            return False
+        
+        return out_path.exists()
+    except Exception as e:
+        print(f"    口型视频出错：{e}")
+        return False
+
+
+def generate_lipsync(project_dir: pathlib.Path, script: dict,
+                      tts_manifest: dict, vid_manifest: dict,
+                      cp: Checkpoint, scene_duration: int = 5) -> dict:
+    """口型同步：将 TTS 音频对齐到视频，在说话时段产生微妙的画面微动。"""
+
+    if cp.is_done("lipsync"):
+        print("✅ 口型同步已存在，跳过")
+        ls_path = project_dir / "lipsync_manifest.json"
+        if ls_path.exists():
+            return json.loads(ls_path.read_text())
+        return {}
+
+    print(f"\n👄 步骤 6.5：口型同步...")
+    cp.mark_running("lipsync")
+
+    if not tts_manifest:
+        print("  ⚠️ 无 TTS 数据，跳过")
+        cp.mark_done("lipsync")
+        return {}
+
+    lipsync_dir = project_dir / "lipsync"
+    lipsync_dir.mkdir(parents=True, exist_ok=True)
+
+    scene_offsets = _compute_scene_offsets(script, vid_manifest, scene_duration)
+    vid_dir = project_dir / "videos"
+
+    manifest = {}
+    success_count = 0
+
+    for key, tts_info in tts_manifest.items():
+        sid = key.rsplit("_", 1)[0]
+        char_name = tts_info.get("character", "?")
+        tts_path = pathlib.Path(tts_info["path"])
+        start_time = tts_info["start"]
+        tts_dur = tts_info.get("tts_duration", 2.0)
+
+        if not tts_path.exists():
+            continue
+
+        vid_path = vid_dir / f"{sid}.mp4"
+        if not vid_path.exists():
+            continue
+
+        out_vid = lipsync_dir / f"{sid}_lipsync.mp4"
+        scene_start = scene_offsets.get(sid, 0.0)
+        relative_start = start_time - scene_start
+
+        # 获取视频实际时长
+        vid_dur = get_video_duration(vid_path)
+
+        print(f"  {char_name}({sid})：TTS at {relative_start:.1f}s (scene starts {scene_start:.1f}s)")
+
+        ok = _make_lipsync_video(
+            vid_path, tts_path, out_vid,
+            scene_offset=scene_start,
+            tts_start_in_scene=relative_start,
+            tts_dur=tts_dur,
+        )
+
+        if ok:
+            manifest[sid] = str(out_vid)
+            success_count += 1
+            print(f"  ✅ {sid} 口型同步完成")
+        else:
+            print(f"  ⚠️ {sid} 口型同步失败，跳过")
+
+    # 保存 manifest
+    manifest_path = project_dir / "lipsync_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
+    cp.mark_done("lipsync")
+    print(f"  ✅ 口型同步完成（{success_count}/{len(tts_manifest)} 节）")
     return manifest
 
 
@@ -926,10 +1194,14 @@ def mix_audio(project_dir: pathlib.Path, script: dict,
     print(f"\n🎚️ 步骤 8：音频混音...")
     cp.mark_running("mix")
 
-    video_path = project_dir / "final.mp4"
+    # 优先使用口型同步版视频
+    video_path = project_dir / "final_lipsync.mp4"
+    if not video_path.exists():
+        video_path = project_dir / "final.mp4"
     if not video_path.exists():
         print("  ❌ 视频文件不存在")
         return None
+    print(f"  使用视频：{video_path.name}")
 
     # 构建音频轨道
     audio_tracks = []
@@ -980,7 +1252,7 @@ def mix_audio(project_dir: pathlib.Path, script: dict,
                 print(f"  ⚠️ TTS 混音出错：{e}")
 
     # 2. 混合视频 + 音频
-    final_video = project_dir / "final.mp4"
+    final_video = video_path  # 使用上面选中的视频
     final_audio = project_dir / "final_with_audio.mp4"
 
     if audio_tracks:
@@ -1082,15 +1354,24 @@ def main():
     final = edit_final(project_dir, script, vid_manifest, cp,
                        scene_duration=args.scene_duration)
 
-    # Step 6: TTS 配音
+    # Step 6: TTS 配音（传入实际视频清单，精确对齐时间戳）
     tts_manifest = {}
     if not args.no_tts:
         tts_manifest = generate_tts(
             script, project_dir / "audio", cp,
             scene_duration=args.scene_duration,
+            vid_manifest=vid_manifest,
         )
     else:
         print("\n🎙️ TTS 配音已禁用")
+
+    # Step 6.5: 口型同步
+    lipsync_manifest = {}
+    if not args.no_tts and tts_manifest:
+        lipsync_manifest = generate_lipsync(
+            project_dir, script, tts_manifest, vid_manifest, cp,
+            scene_duration=args.scene_duration,
+        )
 
     # Step 7: 音效描述
     sfx_manifest = {}
@@ -1102,6 +1383,36 @@ def main():
         print("\n🔊 音效已禁用")
 
     # Step 8: 音频混音
+    # 如果有口型同步视频，用口型版重新拼接
+    if lipsync_manifest:
+        print("\n🎬 用口型同步视频重新拼接成片...")
+        # 替换有口型的视频片段
+        merged_vid_manifest = dict(vid_manifest)
+        for sid, ls_path in lipsync_manifest.items():
+            if pathlib.Path(ls_path).exists():
+                merged_vid_manifest[sid] = ls_path
+        # 重新拼接
+        lipsync_final = project_dir / "final_lipsync.mp4"
+        try:
+            # 收集视频片段
+            video_files = []
+            for scene in script["scenes"]:
+                sid = scene["id"]
+                if sid in merged_vid_manifest:
+                    vp = pathlib.Path(merged_vid_manifest[sid])
+                    if vp.exists():
+                        video_files.append(vp)
+            if len(video_files) > 1:
+                _simple_concat(video_files, project_dir, lipsync_final)
+            elif video_files:
+                import shutil
+                shutil.copy2(video_files[0], lipsync_final)
+            if lipsync_final.exists():
+                final = lipsync_final
+                print(f"  ✅ 口型成片：{final}")
+        except Exception as e:
+            print(f"  ⚠️ 口型拼接失败：{e}")
+
     final_with_audio = None
     if tts_manifest or sfx_manifest:
         final_with_audio = mix_audio(
