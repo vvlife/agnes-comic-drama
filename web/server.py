@@ -95,7 +95,8 @@ def get_env():
 
 
 def run_generator(theme: str, duration: int, style: str, genre: str,
-                  scene_duration: int, output_dir: str, job_id: str):
+                  scene_duration: int, output_dir: str, job_id: str,
+                  enable_tts: bool = True, enable_sfx: bool = True):
     """后台执行 run.py，并实时更新 job 状态"""
     jobs[job_id]["status"] = "running"
     jobs[job_id]["logs"] = []
@@ -119,6 +120,10 @@ def run_generator(theme: str, duration: int, style: str, genre: str,
             "--scene-duration", str(scene_duration),
             "--output", output_dir,
         ]
+        if not enable_tts:
+            cmd.append("--no-tts")
+        if not enable_sfx:
+            cmd.append("--no-sfx")
 
         log(f"🚀 启动生成任务...")
         log(f"   主题：{theme}")
@@ -197,6 +202,8 @@ def api_generate():
     style = body.get("style", "三渲二国风")
     genre = body.get("genre", "仙侠")
     scene_duration = int(body.get("scene_duration", 5))
+    enable_tts = body.get("enable_tts", True)
+    enable_sfx = body.get("enable_sfx", True)
 
     # 生成输出目录名
     import re
@@ -216,7 +223,8 @@ def api_generate():
 
     t = threading.Thread(
         target=run_generator,
-        args=(theme, duration, style, genre, scene_duration, output_dir, job_id),
+        args=(theme, duration, style, genre, scene_duration, output_dir, job_id,
+              enable_tts, enable_sfx),
         daemon=True,
     )
     t.start()

@@ -13,9 +13,10 @@ Agnes 漫剧生成 - 一键运行脚本
   5. 成片拼接（ffmpeg）
 
 可选（需额外 API Key）：
-  6. TTS 配音（ARK_API_KEY）
-  7. 对口型（KLING_API_KEY）
-  8. BGM（SUNO_API_KEY）
+  6. TTS 配音（edge-tts 跨平台 / macOS say 回退）
+  7. 音效生成（Agnes 文本描述 + 免费音效库）
+  8. 对口型（KLING_API_KEY）
+  9. BGM（Suno / Agnes 生成 M3U）
 """
 
 from __future__ import annotations
@@ -89,6 +90,23 @@ DEFAULTS = {
     "style": "三渲二国风",
     "genre": "仙侠",
     "size": "portrait",
+    "enable_tts": True,
+    "enable_sfx": True,
+    "enable_bgm": False,
+}
+
+# 音效提示词模板（用于描述场景音效）
+SFX_TEMPLATES = {
+    "剑气": "sword slash, metallic whoosh, sharp blade cutting air",
+    "法术": "magical energy burst, mystical sparkle, ethereal power",
+    "爆炸": "explosion, impact, debris scattering, low rumble",
+    "风声": "wind howling, gusty breeze, air rushing",
+    "水声": "water flowing, stream bubbling, gentle splash",
+    "脚步声": "footsteps on stone, echoing in corridor",
+    "心跳": "heartbeat, rhythmic thumping, tense atmosphere",
+    "雷鸣": "thunder rumble, storm approaching, dramatic",
+    "鸟鸣": "birds chirping, peaceful nature, morning ambience",
+    "战斗": "clashing weapons, combat, intense action",
 }
 
 
@@ -206,6 +224,12 @@ def generate_script(client: AgnesClient, theme: str, style: str, genre: str,
         json_str = json_str.split("```")[1].split("```")[0]
 
     script = json.loads(json_str.strip())
+
+    # 确保每个场景都有 mood 字段
+    for scene in script.get("scenes", []):
+        if "mood" not in scene:
+            scene["mood"] = "紧张"
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(script, ensure_ascii=False, indent=2))
     cp.mark_done("script")
@@ -622,6 +646,375 @@ def format_srt_time(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
+# ===================== TTS 配音 =====================
+
+# edge-tts 语音映射
+EDGE_TTS_VOICES = {
+    "male": [
+        "zh-CN-YunxiNeural",      # 阳光男声（首选）
+        "zh-CN-YunjianNeural",    # 沉稳男声
+        "zh-CN-YunyangNeural",    # 新闻男声
+    ],
+    "female": [
+        "zh-CN-XiaoxiaoNeural",   # 温柔女声（首选）
+        "zh-CN-XiaoyiNeural",     # 甜美女声
+        "zh-CN-XiaohanNeural",    # 知性女声
+    ],
+}
+
+
+def _run_edge_tts(text: str, voice: str, out_path: pathlib.Path) -> bool:
+    """用 edge-tts Python API 生成 TTS（跨平台，无需系统依赖）。"""
+    import asyncio
+    try:
+        import edge_tts
+    except ImportError:
+        return False
+
+    async def _generate():
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(str(out_path))
+
+    try:
+        # 检测是否有运行中的事件循环
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # 在已有事件循环中，用 nest_asyncio 或新建线程
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(asyncio.run, _generate())
+                future.result(timeout=60)
+        else:
+            asyncio.run(_generate())
+        return out_path.exists()
+    except Exception as e:
+        print(f"    edge-tts 错误：{e}")
+        return False
+
+
+def _run_say_tts(text: str, voice: str, out_path: pathlib.Path) -> bool:
+    """用 macOS say 生成 TTS（仅 macOS 可用，作为回退）。"""
+    try:
+        aiff_path = out_path.with_suffix(".aiff")
+        subprocess.run(["say", "-v", voice, "-o", str(aiff_path), text],
+                       capture_output=True, timeout=30)
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(aiff_path),
+             "-ar", "24000", "-b:a", "64k", str(out_path)],
+            capture_output=True, timeout=30)
+        aiff_path.unlink(missing_ok=True)
+        return out_path.exists()
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    except Exception as e:
+        print(f"    macOS say 错误：{e}")
+        return False
+
+
+def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
+                 scene_duration: int = 5) -> dict:
+    """为剧本对白生成 TTS 音频。优先 edge-tts（跨平台），回退到 macOS say。"""
+
+    if cp.is_done("tts"):
+        print("✅ TTS 已存在，跳过")
+        manifest_path = audio_dir / "tts_manifest.json"
+        if manifest_path.exists():
+            return json.loads(manifest_path.read_text())
+        return {}
+
+    print(f"\n🎙️ 步骤 6：生成 TTS 配音...")
+    cp.mark_running("tts")
+    audio_dir.mkdir(parents=True, exist_ok=True)
+
+    # 检测 TTS 引擎优先级：edge-tts > macOS say
+    tts_engine = None
+    try:
+        import edge_tts  # noqa: F401
+        tts_engine = "edge-tts"
+        print("  使用 edge-tts 引擎（跨平台）")
+    except ImportError:
+        if sys.platform == "darwin":
+            try:
+                subprocess.run(["say", "-v", "?"], capture_output=True, timeout=5)
+                tts_engine = "say"
+                print("  使用 macOS say 引擎（回退）")
+            except FileNotFoundError:
+                pass
+        if not tts_engine:
+            print("  ⚠️ 未找到 TTS 引擎，尝试自动安装 edge-tts...")
+            try:
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "edge-tts", "-q"],
+                    capture_output=True, timeout=60)
+                import edge_tts  # noqa: F401
+                tts_engine = "edge-tts"
+                print("  ✅ edge-tts 自动安装成功")
+            except Exception:
+                print("  ❌ 无法安装 edge-tts，跳过配音")
+                cp.mark_done("tts")
+                return {}
+
+    manifest = {}
+    idx = 0
+
+    for scene_idx, scene in enumerate(script["scenes"]):
+        sid = scene["id"]
+        dialogues = scene.get("dialogue", [])
+        if not dialogues:
+            continue
+
+        per_dialogue = scene_duration / max(len(dialogues), 1)
+
+        for d_idx, d in enumerate(dialogues):
+            char_id = d.get("character", "")
+            text = d.get("text", "")
+            if not text:
+                continue
+
+            # 查找角色信息
+            char_name = char_id
+            char_gender = "male"  # 默认
+            for c in script.get("characters", []):
+                if c["id"] == char_id:
+                    char_name = c["name"]
+                    visual = c.get("visual", "").lower()
+                    if any(w in visual for w in ["女", "娘", "姑", "妃", "姬", "婉", "柔"]):
+                        char_gender = "female"
+                    break
+
+            out_path = audio_dir / f"tts_{sid}_{d_idx:02d}.mp3"
+
+            # 计算时间戳
+            start_time = scene_idx * scene_duration + d_idx * per_dialogue
+
+            # 选择语音
+            if tts_engine == "edge-tts":
+                voice = EDGE_TTS_VOICES.get(char_gender, EDGE_TTS_VOICES["male"])[0]
+                success = _run_edge_tts(text, voice, out_path)
+            elif tts_engine == "say":
+                voice = "Ting-Ting" if char_gender == "female" else "Li-Mu"
+                success = _run_say_tts(text, voice, out_path)
+            else:
+                success = False
+
+            # edge-tts 失败时尝试 say 回退
+            if not success and tts_engine == "edge-tts" and sys.platform == "darwin":
+                voice = "Ting-Ting" if char_gender == "female" else "Li-Mu"
+                success = _run_say_tts(text, voice, out_path)
+                if success:
+                    print(f"    （回退到 macOS say）")
+
+            if success and out_path.exists():
+                manifest[f"{sid}_{d_idx}"] = {
+                    "path": str(out_path),
+                    "character": char_name,
+                    "text": text,
+                    "start": start_time,
+                    "duration": per_dialogue,
+                }
+                print(f"  ✅ {char_name}: {text[:20]}...")
+                idx += 1
+            else:
+                print(f"  ❌ TTS 失败 {char_name}: {text[:20]}...")
+
+    manifest_path = audio_dir / "tts_manifest.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
+    cp.mark_done("tts")
+    print(f"  ✅ TTS 已保存：{audio_dir}（共 {idx} 条）")
+    return manifest
+
+
+# ===================== 音效生成 =====================
+
+def generate_sfx(client: AgnesClient, script: dict, sfx_dir: pathlib.Path,
+                 cp: Checkpoint, rate_limiter: RateLimiter) -> dict:
+    """为场景生成音效描述（文本），后续可用免费音效库匹配。"""
+
+    if cp.is_done("sfx"):
+        print("✅ 音效已存在，跳过")
+        manifest_path = sfx_dir / "sfx_manifest.json"
+        if manifest_path.exists():
+            return json.loads(manifest_path.read_text())
+        return {}
+
+    print(f"\n🔊 步骤 7：生成音效描述...")
+    cp.mark_running("sfx")
+
+    manifest = {}
+
+    for scene in script["scenes"]:
+        sid = scene["id"]
+        action = scene.get("action", "")
+        mood = scene.get("mood", "")
+        location = scene.get("location", "")
+
+        # 用 AI 分析场景，输出音效描述
+        prompt = f"""分析以下漫剧场景，输出适合的音效描述（英文关键词，用于搜索免费音效库）。
+
+场景：{location}
+动作：{action}
+氛围：{mood}
+
+输出 JSON 格式：
+{{
+  "ambient": "环境音描述（如：wind, forest, peaceful）",
+  "actions": ["动作音效1", "动作音效2"],
+  "mood": "氛围音效（如：tension, mysterious）"
+}}
+
+只输出 JSON，不要其他文字。"""
+
+        try:
+            rate_limiter.wait()
+            result = client.chat(
+                messages=[{"role": "user", "content": prompt}],
+                model="agnes-1.5-flash",  # 用轻量模型
+                temperature=0.7,
+                max_tokens=512,
+            )
+
+            # 提取 JSON
+            json_str = result
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0]
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0]
+
+            sfx_desc = json.loads(json_str.strip())
+
+            # 保存描述
+            manifest[sid] = {
+                "description": sfx_desc,
+                "keywords": " ".join([
+                    sfx_desc.get("ambient", ""),
+                    " ".join(sfx_desc.get("actions", [])),
+                    sfx_desc.get("mood", "")
+                ]).strip(),
+            }
+
+            print(f"  ✅ {sid}: {manifest[sid]['keywords'][:50]}...")
+
+        except Exception as e:
+            print(f"  ⚠️ {sid} 音效分析失败：{e}")
+            manifest[sid] = {"description": {}, "keywords": ""}
+
+    manifest_path = sfx_dir / "sfx_manifest.json"
+    sfx_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
+    cp.mark_done("sfx")
+    print(f"  ✅ 音效描述已保存：{sfx_dir}")
+    return manifest
+
+
+# ===================== 音频混音 =====================
+
+def mix_audio(project_dir: pathlib.Path, script: dict,
+              tts_manifest: dict, sfx_manifest: dict,
+              cp: Checkpoint, scene_duration: int = 5) -> pathlib.Path | None:
+    """混合视频 + TTS 配音 + 音效（可选占位）。"""
+
+    if cp.is_done("mix"):
+        final = project_dir / "final_with_audio.mp4"
+        if final.exists():
+            print(f"✅ 混音成片已存在：{final}")
+            return final
+
+    print(f"\n🎚️ 步骤 8：音频混音...")
+    cp.mark_running("mix")
+
+    video_path = project_dir / "final.mp4"
+    if not video_path.exists():
+        print("  ❌ 视频文件不存在")
+        return None
+
+    # 构建音频轨道
+    audio_tracks = []
+
+    # 1. TTS 轨道（按时间对齐）
+    if tts_manifest:
+        print(f"  合成 {len(tts_manifest)} 条 TTS...")
+
+        # 创建 concat 列表，按时间排序
+        tts_items = sorted(tts_manifest.items(), key=lambda x: x[1]["start"])
+
+        # 生成静音填充 + TTS 的复杂滤镜
+        filter_parts = []
+        inputs = []
+        input_idx = 0
+
+        for key, info in tts_items:
+            tts_path = pathlib.Path(info["path"])
+            if not tts_path.exists():
+                continue
+
+            start = info["start"]
+            # 添加输入
+            inputs += ["-i", str(tts_path)]
+            # adelay 滤镜
+            delay_ms = int(start * 1000)
+            filter_parts.append(f"[{input_idx}:a]adelay={delay_ms}|{delay_ms}[a{input_idx}]")
+            input_idx += 1
+
+        if filter_parts:
+            # 混合所有音频
+            n = input_idx
+            amix_inputs = "".join([f"[a{i}]" for i in range(n)])
+            filter_complex = ";".join(filter_parts) + f";{amix_inputs}amix=inputs={n}:duration=longest[aout]"
+
+            tts_mixed = project_dir / "tts_mixed.m4a"
+            cmd = ["ffmpeg", "-y"] + inputs + ["-filter_complex", filter_complex, "-map", "[aout]",
+                   "-c:a", "aac", "-b:a", "128k", str(tts_mixed)]
+
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                if result.returncode == 0 and tts_mixed.exists():
+                    audio_tracks.append(("tts", tts_mixed))
+                    print(f"  ✅ TTS 轨道合成完成")
+                else:
+                    print(f"  ⚠️ TTS 混音失败：{result.stderr[:200]}")
+            except Exception as e:
+                print(f"  ⚠️ TTS 混音出错：{e}")
+
+    # 2. 混合视频 + 音频
+    final_video = project_dir / "final.mp4"
+    final_audio = project_dir / "final_with_audio.mp4"
+
+    if audio_tracks:
+        # 有音频轨道，混合
+        cmd = ["ffmpeg", "-y", "-i", str(final_video)]
+        for _, audio_path in audio_tracks:
+            cmd += ["-i", str(audio_path)]
+
+        # 简单混合：视频 + 所有音频
+        if len(audio_tracks) == 1:
+            cmd += ["-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", str(final_audio)]
+        else:
+            # 多音频混合
+            n_audio = len(audio_tracks)
+            amix = "".join([f"[{i+1}:a]" for i in range(n_audio)])
+            filter_complex = f"{amix}amix=inputs={n_audio}:duration=first[aout]"
+            cmd += ["-filter_complex", filter_complex, "-map", "0:v", "-map", "[aout]",
+                    "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", str(final_audio)]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+            if result.returncode == 0 and final_audio.exists():
+                print(f"  ✅ 混音完成：{final_audio}")
+                cp.mark_done("mix")
+                return final_audio
+            else:
+                print(f"  ⚠️ 混音失败：{result.stderr[:200]}")
+        except Exception as e:
+            print(f"  ⚠️ 混音出错：{e}")
+
+    print("  ⚠️ 无音频可混合，返回原视频")
+    return final_video
+
+
 # ===================== 主流程 =====================
 
 def main():
@@ -632,6 +1025,8 @@ def main():
     parser.add_argument("--genre", default="仙侠", help="类型")
     parser.add_argument("--scene-duration", type=int, default=5, help="单镜头秒数")
     parser.add_argument("--output", default=None, help="输出目录")
+    parser.add_argument("--no-tts", action="store_true", help="禁用 TTS 配音")
+    parser.add_argument("--no-sfx", action="store_true", help="禁用音效")
     args = parser.parse_args()
 
     n_scenes = args.duration // args.scene_duration
@@ -687,7 +1082,39 @@ def main():
     final = edit_final(project_dir, script, vid_manifest, cp,
                        scene_duration=args.scene_duration)
 
-    if final:
+    # Step 6: TTS 配音
+    tts_manifest = {}
+    if not args.no_tts:
+        tts_manifest = generate_tts(
+            script, project_dir / "audio", cp,
+            scene_duration=args.scene_duration,
+        )
+    else:
+        print("\n🎙️ TTS 配音已禁用")
+
+    # Step 7: 音效描述
+    sfx_manifest = {}
+    if not args.no_sfx:
+        sfx_manifest = generate_sfx(
+            client, script, project_dir / "sfx", cp, rl,
+        )
+    else:
+        print("\n🔊 音效已禁用")
+
+    # Step 8: 音频混音
+    final_with_audio = None
+    if tts_manifest or sfx_manifest:
+        final_with_audio = mix_audio(
+            project_dir, script, tts_manifest, sfx_manifest, cp,
+            scene_duration=args.scene_duration,
+        )
+
+    if final_with_audio:
+        print(f"\n🎉 漫剧生成完成！")
+        print(f"  📁 成片（含配音）：{final_with_audio}")
+        print(f"  📁 成片（静音）：{final}")
+        print(f"  💰 成本：¥0.00（Agnes AI 免费额度）")
+    elif final:
         print(f"\n🎉 漫剧生成完成！")
         print(f"  📁 成片：{final}")
         print(f"  💰 成本：¥0.00（Agnes AI 免费额度）")

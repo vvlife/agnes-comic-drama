@@ -1,0 +1,2 @@
+requests>=2.28
+edge-tts>=6.1
