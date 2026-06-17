@@ -1038,6 +1038,18 @@ def api_job_status(job_id: str):
     })
 
 
+@app.route("/api/static-video/<filename>", methods=["GET"])
+def api_serve_static_video(filename: str):
+    """Serve pre-bundled example videos from api/videos/."""
+    vid_dir = API_DIR / "videos"
+    target = (vid_dir / filename).resolve()
+    if not str(target).startswith(str(vid_dir.resolve())):
+        return jsonify({"error": "非法路径"}), 403
+    if not target.exists():
+        return jsonify({"error": "文件不存在"}), 404
+    return send_file(target)
+
+
 @app.route("/api/jobs", methods=["GET"])
 def api_list_jobs():
     return jsonify({

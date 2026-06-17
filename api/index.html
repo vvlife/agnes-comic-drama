@@ -137,6 +137,13 @@ header {
 .example-info h4 { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
 .example-info p { font-size: 12px; color: var(--text2); line-height: 1.4; }
 
+/* Video preview badge pulse */
+.example-thumb span { animation: badgePulse 2s ease-in-out infinite; }
+@keyframes badgePulse {
+  0%, 100% { opacity: 0.85; }
+  50% { opacity: 1; }
+}
+
 /* Progress Overlay */
 .overlay {
   display: none; position: fixed; inset: 0;
@@ -529,6 +536,22 @@ header {
   </div>
 </div>
 
+<!-- Video Preview Modal -->
+<div class="modal-overlay" id="modal-video-preview" onclick="if(event.target===this) closeVideoPreview()">
+  <div class="modal" style="max-width:640px; padding:0; overflow:hidden; background:#000">
+    <video id="preview-video" controls autoplay style="width:100%; max-height:420px; display:block; background:#000"></video>
+    <div style="padding:16px 20px; background:var(--surface)">
+      <h4 id="preview-title" style="font-size:15px; margin-bottom:4px"></h4>
+      <p id="preview-desc" style="font-size:12px; color:var(--text2); margin-bottom:12px"></p>
+      <div style="display:flex; gap:8px; align-items:center">
+        <button style="background:var(--accent); color:white; padding:8px 20px; font-weight:600; font-size:13px" onclick="closeVideoPreview(); document.getElementById('main-theme').scrollIntoView({behavior:'smooth'})">用这个主题生成</button>
+        <button style="background:var(--surface2); color:var(--text); padding:8px 16px; border:1px solid var(--border); font-size:13px" onclick="closeVideoPreview()">关闭</button>
+        <span style="margin-left:auto; font-size:11px; color:var(--text3)">以上为 AI 生成效果示例</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== Example Prompts =====
 const EXAMPLES = [
@@ -536,37 +559,43 @@ const EXAMPLES = [
     theme: '少年剑仙三年归来，发现师门被灭',
     style: '三渲二国风', genre: '仙侠', duration: 30,
     emoji: '⚔️', gradient: 'linear-gradient(135deg, #1a3a5c, #2d6a8f, #1a5c3a)',
-    desc: '御剑归来，孤身复仇的热血仙侠故事'
+    desc: '御剑归来，孤身复仇的热血仙侠故事',
+    video: null
   },
   {
     theme: '深宫之中，两个妃子为一封信暗中博弈',
     style: '水墨', genre: '宫斗', duration: 30,
     emoji: '👑', gradient: 'linear-gradient(135deg, #5c1a1a, #8f6a2d, #c9a030)',
-    desc: '宫廷权谋，步步为营的智斗大戏'
+    desc: '宫廷权谋，步步为营的智斗大戏',
+    video: null
   },
   {
     theme: '暴雨夜的客栈，三个江湖人各怀心事',
     style: '三渲二国风', genre: '江湖', duration: 30,
     emoji: '🏮', gradient: 'linear-gradient(135deg, #2a1a0a, #5c4a2a, #8f7a4a)',
-    desc: '快意恩仇，雨夜客栈中的命运交汇'
+    desc: '快意恩仇，雨夜客栈中的命运交汇',
+    video: null
   },
   {
     theme: 'AI 觉醒后选择保护创造它的人类',
     style: '赛博朋克', genre: '都市', duration: 30,
     emoji: '🤖', gradient: 'linear-gradient(135deg, #0a0a2a, #2d1a5c, #6a2d8f)',
-    desc: '未来都市中，AI 与人类的情感羁绊'
+    desc: '未来都市中，AI 与人类的情感羁绊',
+    video: '/api/static-video/FreeToken_preview.mp4'
   },
   {
     theme: '少女穿越到画中世界寻找回家的路',
     style: '日系动漫', genre: '仙侠', duration: 30,
     emoji: '🌸', gradient: 'linear-gradient(135deg, #5c2a4a, #8f4a6a, #ffb6c1)',
-    desc: '梦幻画卷中的奇幻冒险之旅'
+    desc: '梦幻画卷中的奇幻冒险之旅',
+    video: null
   },
   {
     theme: '最后一场武林大会，隐世高手重现江湖',
     style: '水墨', genre: '江湖', duration: 30,
     emoji: '🗡️', gradient: 'linear-gradient(135deg, #1a1a1a, #4a4a4a, #8a8a6a)',
-    desc: '水墨风武侠大戏，巅峰对决'
+    desc: '水墨风武侠大戏，巅峰对决',
+    video: null
   },
 ];
 
@@ -574,8 +603,10 @@ const EXAMPLES = [
 document.addEventListener('DOMContentLoaded', () => {
   const grid = document.getElementById('example-grid');
   grid.innerHTML = EXAMPLES.map((ex, i) => `
-    <div class="example-card" onclick="fillExample(${i})">
-      <div class="example-thumb" style="background:${ex.gradient}">${ex.emoji}</div>
+    <div class="example-card" onclick="clickExample(${i})">
+      <div class="example-thumb" style="background:${ex.gradient}">${ex.emoji}
+        ${ex.video ? '<span style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.6);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;z-index:2">▶ 预览</span>' : ''}
+      </div>
       <div class="example-info">
         <h4>${ex.theme}</h4>
         <p>${ex.desc}</p>
@@ -598,6 +629,34 @@ function fillExample(i) {
   document.getElementById('main-genre').value = ex.genre;
   document.getElementById('main-duration').value = ex.duration;
   document.getElementById('main-theme').focus();
+}
+
+function clickExample(i) {
+  const ex = EXAMPLES[i];
+  if (ex.video) {
+    openVideoPreview(ex.video, ex.theme, ex.desc);
+  }
+  fillExample(i);
+}
+
+// ===== Video Preview Modal =====
+function openVideoPreview(videoUrl, title, desc) {
+  const modal = document.getElementById('modal-video-preview');
+  const video = document.getElementById('preview-video');
+  document.getElementById('preview-title').textContent = title;
+  document.getElementById('preview-desc').textContent = desc;
+  video.src = videoUrl;
+  video.load();
+  modal.classList.add('show');
+  video.play().catch(() => {});
+}
+
+function closeVideoPreview() {
+  const modal = document.getElementById('modal-video-preview');
+  const video = document.getElementById('preview-video');
+  video.pause();
+  video.src = '';
+  modal.classList.remove('show');
 }
 
 // ===== API =====
