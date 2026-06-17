@@ -1,0 +1,1549 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎭 Agnes 漫剧生成器</title>
+<style>
+:root {
+  --bg: #0a0a0f;
+  --surface: #13131a;
+  --surface2: #1a1a24;
+  --surface3: #222233;
+  --border: #2a2a3a;
+  --text: #e8e8f0;
+  --text2: #8888a0;
+  --text3: #555570;
+  --accent: #6c5ce7;
+  --accent2: #a29bfe;
+  --success: #00b894;
+  --warning: #fdcb6e;
+  --error: #e17055;
+  --glow: rgba(108, 92, 231, 0.3);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family: -apple-system, 'SF Pro', 'Helvetica Neue', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+a { color: var(--accent2); text-decoration: none; }
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  transition: all 0.2s;
+}
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+input, select, textarea {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  width: 100%;
+  outline: none;
+}
+input:focus, select:focus, textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--glow);
+}
+textarea { resize: vertical; min-height: 60px; }
+
+.app { max-width: 1200px; margin: 0 auto; padding: 20px; }
+
+/* ===== Header ===== */
+header {
+  text-align: center;
+  padding: 30px 0 20px;
+  position: relative;
+}
+header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent2), var(--accent), var(--success));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
+.header-actions { position: absolute; top: 30px; right: 20px; display:flex; gap:8px }
+.header-actions button {
+  background: var(--surface2);
+  color: var(--text2);
+  padding: 6px 14px;
+  font-size: 13px;
+}
+.header-actions button:hover { color: var(--text); background: var(--surface3); }
+
+/* ===== Step Tabs ===== */
+.step-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 24px 0 20px;
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 4px;
+}
+.step-tab {
+  flex: 1;
+  padding: 14px 16px;
+  text-align: center;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text2);
+  font-size: 15px;
+  font-weight: 500;
+  transition: all 0.25s;
+}
+.step-tab:hover { color: var(--text); background: var(--surface2); }
+.step-tab.active {
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 4px 15px var(--glow);
+}
+.step-num {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.15);
+  font-size: 12px;
+  margin-right: 6px;
+  text-align: center;
+}
+.step-tab.active .step-num { background: rgba(255,255,255,0.3); }
+
+/* ===== Panels ===== */
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ===== Card ===== */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.card-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ===== Form Row ===== */
+.form-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+  align-items: flex-start;
+}
+.form-group { flex: 1; }
+.form-group label {
+  display: block;
+  font-size: 12px;
+  color: var(--text2);
+  margin-bottom: 4px;
+}
+.form-hint {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+
+/* ===== Buttons ===== */
+.btn-primary {
+  background: var(--accent);
+  color: white;
+  padding: 10px 24px;
+  font-weight: 600;
+}
+.btn-primary:hover { background: var(--accent2); }
+.btn-secondary {
+  background: var(--surface2);
+  color: var(--text);
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+}
+.btn-secondary:hover { background: var(--surface3); }
+.btn-success { background: var(--success); color: white; padding: 8px 16px; }
+.btn-danger { background: var(--error); color: white; padding: 8px 16px; }
+.btn-small { padding: 6px 12px; font-size: 12px; }
+
+/* ===== Character Cards ===== */
+.char-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
+}
+.char-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 0.2s;
+}
+.char-card:hover { border-color: var(--accent); }
+.char-images {
+  display: flex;
+  gap: 4px;
+  padding: 8px;
+  background: var(--bg);
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.char-images img {
+  max-height: 140px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+.char-images .no-img {
+  color: var(--text3);
+  font-size: 13px;
+  text-align: center;
+  padding: 30px;
+}
+.char-info { padding: 12px; }
+.char-info h3 { font-size: 16px; margin-bottom: 4px; }
+.char-info .char-detail { color: var(--text2); font-size: 13px; margin-bottom: 8px; }
+.char-actions { display: flex; gap: 6px; }
+
+/* ===== Timeline ===== */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.scene-row {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  transition: all 0.2s;
+}
+.scene-row:hover { border-color: var(--accent); }
+.scene-row.dragging { opacity: 0.5; }
+.scene-order {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-width: 36px;
+  color: var(--text3);
+  font-size: 18px;
+  font-weight: 700;
+  cursor: grab;
+}
+.scene-order span { font-size: 10px; color: var(--text3); }
+.scene-thumb {
+  width: 100px;
+  min-height: 140px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.scene-thumb img { width: 100%; object-fit: cover; }
+.scene-thumb .no-thumb { color: var(--text3); font-size: 11px; text-align: center; padding: 8px; }
+.scene-content { flex: 1; min-width: 0; }
+.scene-content h4 { font-size: 14px; margin-bottom: 4px; }
+.scene-meta { color: var(--text2); font-size: 12px; margin-bottom: 6px; }
+.scene-dialogue {
+  font-size: 13px;
+  color: var(--accent2);
+  margin-bottom: 6px;
+}
+.scene-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.scene-video {
+  width: 120px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg);
+}
+.scene-video video { width: 100%; max-height: 160px; }
+.scene-video .no-video { color: var(--text3); font-size: 11px; text-align: center; padding: 8px; }
+
+/* ===== Progress / Job ===== */
+.job-panel {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-top: 16px;
+}
+.job-logs {
+  background: var(--bg);
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text2);
+  margin-top: 8px;
+  white-space: pre-wrap;
+}
+.job-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.job-status .spinner {
+  width: 16px; height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== Modal ===== */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  width: 90%;
+  max-width: 500px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.modal h2 { margin-bottom: 16px; }
+.modal .form-group { margin-bottom: 14px; }
+
+/* ===== Project List ===== */
+.project-list { margin-top: 12px; }
+.project-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.project-item:hover { border-color: var(--accent); background: var(--surface3); }
+.project-title { font-weight: 600; font-size: 15px; }
+.project-meta { color: var(--text2); font-size: 12px; margin-top: 2px; }
+.project-badges { display: flex; gap: 4px; }
+.badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.badge-yes { background: rgba(0,184,148,0.15); color: var(--success); }
+.badge-no { background: rgba(136,136,160,0.1); color: var(--text3); }
+
+/* ===== Empty State ===== */
+.empty {
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--text2);
+}
+.empty-icon { font-size: 48px; margin-bottom: 12px; }
+.empty p { margin-bottom: 16px; }
+
+/* ===== Auto Mode Progress ===== */
+.auto-progress {
+  margin-top: 16px;
+  background: var(--surface2);
+  border-radius: 12px;
+  padding: 16px;
+}
+.auto-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  font-size: 14px;
+}
+.auto-step .step-icon { font-size: 18px; }
+.auto-step .step-text { flex: 1; }
+.auto-step.pending { color: var(--text3); }
+.auto-step.running { color: var(--accent2); }
+.auto-step.done { color: var(--success); }
+.auto-step.failed { color: var(--error); }
+.auto-bar {
+  width: 100%;
+  height: 6px;
+  background: var(--surface3);
+  border-radius: 3px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+.auto-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.5s;
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>🎭 Agnes 漫剧生成器</h1>
+    <p>免费 AI 漫剧 · 脚本 → 角色 → 成片</p>
+    <div class="header-actions">
+      <button onclick="openAutoModal()" style="background:var(--accent);color:white">🚀 自动模式</button>
+      <button onclick="openProjectsModal()">📂 项目</button>
+      <button onclick="openSettingsModal()">⚙️ 设置</button>
+    </div>
+  </header>
+
+  <!-- Step Tabs -->
+  <div class="step-tabs">
+    <button class="step-tab active" onclick="switchTab(0)">
+      <span class="step-num">1</span> 脚本管理
+    </button>
+    <button class="step-tab" onclick="switchTab(1)">
+      <span class="step-num">2</span> 人物管理
+    </button>
+    <button class="step-tab" onclick="switchTab(2)">
+      <span class="step-num">3</span> 制作片子
+    </button>
+  </div>
+
+  <!-- Panel 0: Script -->
+  <div class="panel active" id="panel-0">
+    <div id="script-empty" class="empty">
+      <div class="empty-icon">📝</div>
+      <p>先创建一个项目，生成你的漫剧脚本</p>
+      <button class="btn-primary" onclick="openNewProjectModal()">+ 新建项目</button>
+    </div>
+    <div id="script-editor" style="display:none">
+      <div class="card">
+        <div class="card-title">📋 脚本参数</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>主题</label>
+            <input id="s-theme" placeholder="如：少年剑仙归来">
+          </div>
+          <div class="form-group" style="max-width:150px">
+            <label>风格</label>
+            <select id="s-style">
+              <option>三渲二国风</option><option>水墨</option><option>赛博朋克</option><option>日系动漫</option>
+            </select>
+          </div>
+          <div class="form-group" style="max-width:120px">
+            <label>类型</label>
+            <select id="s-genre">
+              <option>仙侠</option><option>宫斗</option><option>江湖</option><option>都市</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="max-width:100px">
+            <label>总时长(秒)</label>
+            <input id="s-duration" type="number" value="15" min="5" max="300" oninput="onScriptParamChange()">
+          </div>
+          <div class="form-group" style="max-width:100px">
+            <label>单镜头(秒)</label>
+            <select id="s-scene-dur" onchange="onScriptParamChange()">
+              <option value="5">5</option><option value="10">10</option><option value="15">15</option>
+            </select>
+          </div>
+          <div class="form-group" style="max-width:100px">
+            <label>镜头数</label>
+            <input id="s-scene-count" type="number" value="3" min="1" max="20" oninput="onSceneCountChange()">
+            <div class="form-hint" id="s-scene-count-hint">= 总时长 / 单镜头</div>
+          </div>
+          <div class="form-group" style="max-width:80px; display:flex; align-items:flex-end">
+            <button class="btn-primary" id="btn-gen-script" onclick="generateScript()">✨ 生成脚本</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="script-content" style="display:none">
+        <div class="card">
+          <div class="card-title">🎬 <span id="script-title"></span>
+            <span style="flex:1"></span>
+            <button class="btn-secondary btn-small" onclick="saveScript()">💾 保存修改</button>
+          </div>
+        </div>
+
+        <!-- Characters Section -->
+        <div class="card">
+          <div class="card-title">👥 角色
+            <span style="flex:1"></span>
+            <button class="btn-secondary btn-small" onclick="addCharacter()">+ 添加角色</button>
+          </div>
+          <div id="script-characters"></div>
+        </div>
+
+        <!-- Scenes Section -->
+        <div class="card">
+          <div class="card-title">🎬 场景
+            <span style="flex:1"></span>
+            <button class="btn-secondary btn-small" onclick="addScene()">+ 添加场景</button>
+          </div>
+          <div id="script-scenes"></div>
+        </div>
+      </div>
+
+      <div id="script-job" class="job-panel" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- Panel 1: Characters -->
+  <div class="panel" id="panel-1">
+    <div id="chars-empty" class="empty">
+      <div class="empty-icon">🎨</div>
+      <p>请先在第一步生成脚本</p>
+    </div>
+    <div id="chars-content" style="display:none">
+      <div style="display:flex; gap:8px; margin-bottom:16px">
+        <button class="btn-primary" id="btn-gen-all-chars" onclick="generateAllCharacters()">🎨 生成全部角色卡</button>
+      </div>
+      <div class="char-grid" id="char-grid"></div>
+    </div>
+    <div id="chars-job" class="job-panel" style="display:none"></div>
+  </div>
+
+  <!-- Panel 2: Production -->
+  <div class="panel" id="panel-2">
+    <div id="prod-empty" class="empty">
+      <div class="empty-icon">🎬</div>
+      <p>请先完成前两步</p>
+    </div>
+    <div id="prod-content" style="display:none">
+      <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap">
+        <button class="btn-primary" id="btn-gen-all-sb" onclick="generateAllStoryboard()">🖼️ 生成分镜</button>
+        <button class="btn-primary" id="btn-gen-all-vid" onclick="generateAllVideos()">📹 生成视频</button>
+        <button class="btn-success" id="btn-render" onclick="renderFinal()">🎬 拼接成片</button>
+        <span style="flex:1"></span>
+        <label style="display:flex; align-items:center; gap:4px; font-size:13px; color:var(--text2)">
+          <input type="checkbox" id="prod-tts" checked> TTS
+        </label>
+        <label style="display:flex; align-items:center; gap:4px; font-size:13px; color:var(--text2)">
+          <input type="checkbox" id="prod-sfx" checked> 音效
+        </label>
+      </div>
+      <div class="timeline" id="timeline"></div>
+
+      <!-- Final Preview -->
+      <div id="final-preview" style="display:none; margin-top:20px">
+        <div class="card">
+          <div class="card-title">🎉 成片预览</div>
+          <video id="final-video" controls style="width:100%; max-height:500px; border-radius:8px; background:#000"></video>
+          <div style="margin-top:8px; display:flex; gap:8px">
+            <a id="final-download" class="btn-secondary" download>⬇️ 下载</a>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="prod-job" class="job-panel" style="display:none"></div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="modal-settings">
+  <div class="modal">
+    <h2>⚙️ 设置</h2>
+    <div class="form-group">
+      <label>Agnes API Key</label>
+      <input id="cfg-apikey" type="password" placeholder="sk-...">
+      <div style="margin-top:6px; font-size:12px; color:var(--text2)">
+        还没有 API Key？
+        <a href="https://platform.agnes-ai.com" target="_blank" rel="noopener" style="color:var(--accent2); text-decoration:underline">前往 Agnes AI 平台免费获取 →</a>
+      </div>
+      <div id="cfg-vercel-hint" style="margin-top:4px; font-size:11px; color:var(--text3); display:none">
+        Vercel 环境下请在 Dashboard → Settings → Environment Variables 中设置 <code style="background:var(--surface2); padding:1px 4px; border-radius:3px">AGNES_API_KEY</code>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:12px">
+      <button class="btn-primary" onclick="saveSettings()">保存</button>
+      <button class="btn-secondary" onclick="testApiKey()">测试</button>
+      <button class="btn-secondary" onclick="closeModal('modal-settings')">取消</button>
+    </div>
+    <div id="settings-msg" style="margin-top:8px; font-size:13px"></div>
+  </div>
+</div>
+
+<!-- New Project Modal -->
+<div class="modal-overlay" id="modal-newproject">
+  <div class="modal">
+    <h2>📝 新建项目</h2>
+    <div class="form-group">
+      <label>主题</label>
+      <input id="np-theme" placeholder="如：少年剑仙归来">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>风格</label>
+        <select id="np-style">
+          <option>三渲二国风</option><option>水墨</option><option>赛博朋克</option><option>日系动漫</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>类型</label>
+        <select id="np-genre">
+          <option>仙侠</option><option>宫斗</option><option>江湖</option><option>都市</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>总时长(秒)</label>
+        <input id="np-duration" type="number" value="15" min="5" max="300" oninput="onNpParamChange()">
+      </div>
+      <div class="form-group">
+        <label>单镜头(秒)</label>
+        <select id="np-scenedur" onchange="onNpParamChange()">
+          <option value="5">5</option><option value="10">10</option><option value="15">15</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>镜头数</label>
+        <input id="np-scenecount" type="number" value="3" min="1" max="20">
+        <div class="form-hint" id="np-scenecount-hint"></div>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>接收邮箱 <span style="color:var(--text2); font-size:12px">（可选，生成完毕后将视频发送到邮箱）</span></label>
+      <input id="np-email" type="email" placeholder="your@email.com">
+    </div>
+    <div style="display:flex; gap:8px; margin-top:12px">
+      <button class="btn-primary" onclick="createProject()">创建并生成脚本</button>
+      <button class="btn-secondary" onclick="closeModal('modal-newproject')">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- Projects Modal -->
+<div class="modal-overlay" id="modal-projects">
+  <div class="modal" style="max-width:600px">
+    <h2>📂 我的项目</h2>
+    <div id="projects-list" class="project-list"></div>
+    <div style="margin-top:12px; display:flex; gap:8px">
+      <button class="btn-secondary" onclick="closeModal('modal-projects')">关闭</button>
+      <button class="btn-primary" onclick="closeModal('modal-projects');openNewProjectModal()">+ 新建</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Character Modal -->
+<div class="modal-overlay" id="modal-editchar">
+  <div class="modal">
+    <h2>✏️ 编辑角色</h2>
+    <input type="hidden" id="ec-id">
+    <div class="form-group"><label>名称</label><input id="ec-name"></div>
+    <div class="form-group"><label>外观描述</label><textarea id="ec-visual" rows="3"></textarea></div>
+    <div class="form-group"><label>性格</label><input id="ec-personality"></div>
+    <div class="form-group"><label>年龄</label><input id="ec-age"></div>
+    <div style="display:flex; gap:8px; margin-top:12px">
+      <button class="btn-primary" onclick="saveCharacterEdit()">保存</button>
+      <button class="btn-secondary" onclick="closeModal('modal-editchar')">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Scene Modal -->
+<div class="modal-overlay" id="modal-editscene">
+  <div class="modal" style="max-width:600px">
+    <h2>✏️ 编辑场景</h2>
+    <input type="hidden" id="es-id">
+    <div class="form-row">
+      <div class="form-group"><label>场景ID</label><input id="es-sid" readonly></div>
+      <div class="form-group"><label>地点</label><input id="es-location"></div>
+      <div class="form-group"><label>时间</label><input id="es-time"></div>
+    </div>
+    <div class="form-group"><label>画面动作</label><textarea id="es-action" rows="2"></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label>镜头</label><input id="es-camera"></div>
+      <div class="form-group"><label>氛围</label><input id="es-mood"></div>
+    </div>
+    <div class="form-group"><label>出场角色(逗号分隔ID)</label><input id="es-chars"></div>
+    <div class="form-group">
+      <label>对白</label>
+      <div class="edit-dialogue" id="es-dialogue"></div>
+      <button class="btn-secondary btn-small" style="margin-top:6px" onclick="addDialogueLine()">+ 添加对白</button>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:12px">
+      <button class="btn-primary" onclick="saveSceneEdit()">保存</button>
+      <button class="btn-secondary" onclick="closeModal('modal-editscene')">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- Auto Mode Modal -->
+<div class="modal-overlay" id="modal-auto">
+  <div class="modal" style="max-width:520px">
+    <h2>🚀 自动模式</h2>
+    <p style="color:var(--text2); font-size:13px; margin-bottom:16px">输入主题，自动执行全部步骤：生成脚本 → 角色卡 → 分镜 → 视频 → 成片</p>
+    <div class="form-group">
+      <label>主题</label>
+      <input id="auto-theme" placeholder="如：少年剑仙归来" onkeydown="if(event.key===&apos;Enter&apos;) startAutoMode()">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>风格</label>
+        <select id="auto-style">
+          <option>三渲二国风</option><option>水墨</option><option>赛博朋克</option><option>日系动漫</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>类型</label>
+        <select id="auto-genre">
+          <option>仙侠</option><option>宫斗</option><option>江湖</option><option>都市</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>总时长(秒)</label>
+        <input id="auto-duration" type="number" value="60" min="5" max="300" oninput="onAutoParamChange()">
+      </div>
+      <div class="form-group">
+        <label>单镜头(秒)</label>
+        <select id="auto-scenedur" onchange="onAutoParamChange()">
+          <option value="5" selected>5</option><option value="10">10</option><option value="15">15</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>镜头数</label>
+        <input id="auto-scenecount" type="number" value="12" min="1" max="20">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>接收邮箱 <span style="color:var(--text2); font-size:12px">（可选，生成完毕后将视频发送到邮箱）</span></label>
+      <input id="auto-email" type="email" placeholder="your@email.com">
+    </div>
+    <div style="display:flex; gap:8px; margin-top:12px">
+      <button class="btn-primary" id="btn-start-auto" onclick="startAutoMode()">🚀 开始生成</button>
+      <button class="btn-secondary" onclick="closeModal(&apos;modal-auto&apos;)">取消</button>
+    </div>
+    <div class="auto-progress" id="auto-progress" style="display:none">
+      <div class="auto-step" id="auto-step1"><span class="step-icon">⏳</span><span class="step-text">生成脚本...</span></div>
+      <div class="auto-step" id="auto-step2"><span class="step-icon">⏳</span><span class="step-text">生成角色卡...</span></div>
+      <div class="auto-step" id="auto-step3"><span class="step-icon">⏳</span><span class="step-text">生成分镜...</span></div>
+      <div class="auto-step" id="auto-step4"><span class="step-icon">⏳</span><span class="step-text">生成视频...</span></div>
+      <div class="auto-step" id="auto-step5"><span class="step-icon">⏳</span><span class="step-text">拼接成片...</span></div>
+      <div class="auto-bar"><div class="auto-bar-fill" id="auto-bar-fill" style="width:0%"></div></div>
+      <div id="auto-logs" class="job-logs" style="margin-top:8px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== State =====
+let currentProject = null;
+let script = null;
+let meta = null;
+let charManifest = {};
+let sbManifest = {};
+let activeJobs = {};
+
+const API = '';
+
+// ===== Scene count calculation =====
+function calcSceneCount(duration, sceneDur) {
+  return Math.max(1, Math.round(duration / sceneDur));
+}
+
+function onScriptParamChange() {
+  const dur = parseInt(document.getElementById('s-duration').value) || 15;
+  const sd = parseInt(document.getElementById('s-scene-dur').value) || 5;
+  const cnt = calcSceneCount(dur, sd);
+  document.getElementById('s-scene-count').value = cnt;
+  document.getElementById('s-scene-count-hint').textContent = `= ${dur}s / ${sd}s`;
+}
+
+function onSceneCountChange() {
+  // User manually set scene count - update hint
+  const dur = parseInt(document.getElementById('s-duration').value) || 15;
+  const sd = parseInt(document.getElementById('s-scene-dur').value) || 5;
+  const cnt = parseInt(document.getElementById('s-scene-count').value) || 3;
+  document.getElementById('s-scene-count-hint').textContent = `= ${dur}s / ${sd}s = ${cnt} 镜头`;
+}
+
+function onNpParamChange() {
+  const dur = parseInt(document.getElementById('np-duration').value) || 15;
+  const sd = parseInt(document.getElementById('np-scenedur').value) || 5;
+  const cnt = calcSceneCount(dur, sd);
+  document.getElementById('np-scenecount').value = cnt;
+  document.getElementById('np-scenecount-hint').textContent = `= ${dur}s / ${sd}s`;
+}
+
+function onAutoParamChange() {
+  const dur = parseInt(document.getElementById('auto-duration').value) || 15;
+  const sd = parseInt(document.getElementById('auto-scenedur').value) || 5;
+  const cnt = calcSceneCount(dur, sd);
+  document.getElementById('auto-scenecount').value = cnt;
+}
+
+// ===== API helpers =====
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    method: opts.method || 'GET',
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res.json();
+}
+
+// ===== Tab switching =====
+function switchTab(idx) {
+  document.querySelectorAll('.step-tab').forEach((t, i) => t.classList.toggle('active', i === idx));
+  document.querySelectorAll('.panel').forEach((p, i) => p.classList.toggle('active', i === idx));
+  if (idx === 1) refreshCharacters();
+  if (idx === 2) refreshProduction();
+}
+
+// ===== Modal helpers =====
+function openModal(id) { document.getElementById(id).classList.add('show'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+function openSettingsModal() {
+  api('/api/config').then(cfg => {
+    document.getElementById('cfg-apikey').value = '';
+    document.getElementById('settings-msg').textContent = cfg.has_key ? '✅ 已配置 API Key' : '⚠️ 未配置';
+    // Show Vercel hint if running on Vercel
+    const vercelHint = document.getElementById('cfg-vercel-hint');
+    if (vercelHint) vercelHint.style.display = cfg.platform === 'vercel' ? '' : 'none';
+    openModal('modal-settings');
+  });
+}
+
+function saveSettings() {
+  const key = document.getElementById('cfg-apikey').value.trim();
+  api('/api/config', { method: 'POST', body: { AGNES_API_KEY: key } }).then(() => {
+    document.getElementById('settings-msg').textContent = '✅ 已保存';
+  });
+}
+
+function testApiKey() {
+  document.getElementById('settings-msg').textContent = '测试中...';
+  api('/api/config/test', { method: 'POST' }).then(r => {
+    document.getElementById('settings-msg').textContent = r.ok ? '✅ API Key 有效' : '❌ ' + r.error;
+  }).catch(e => { document.getElementById('settings-msg').textContent = '❌ ' + e.message; });
+}
+
+function openNewProjectModal() {
+  document.getElementById('np-theme').value = '';
+  onNpParamChange();
+  openModal('modal-newproject');
+}
+
+function openProjectsModal() {
+  api('/api/projects').then(data => {
+    const el = document.getElementById('projects-list');
+    if (!data.projects.length) {
+      el.innerHTML = '<div class="empty" style="padding:30px"><p>暂无项目</p></div>';
+    } else {
+      el.innerHTML = data.projects.map(p => `
+        <div class="project-item" onclick="loadProject(&apos;${p.id}&apos;)">
+          <div>
+            <div class="project-title">${p.title || p.id}</div>
+            <div class="project-meta">${new Date(p.modified*1000).toLocaleString('zh-CN')}</div>
+          </div>
+          <div class="project-badges">
+            ${p.has_script ? '<span class="badge badge-yes">脚本</span>' : '<span class="badge badge-no">脚本</span>'}
+            ${p.has_characters ? '<span class="badge badge-yes">角色</span>' : '<span class="badge badge-no">角色</span>'}
+            ${p.has_storyboard ? '<span class="badge badge-yes">分镜</span>' : '<span class="badge badge-no">分镜</span>'}
+            ${p.has_videos ? '<span class="badge badge-yes">视频</span>' : '<span class="badge badge-no">视频</span>'}
+            ${p.has_final ? '<span class="badge badge-yes">成片</span>' : '<span class="badge badge-no">成片</span>'}
+          </div>
+          <button class="btn-danger btn-small" onclick="event.stopPropagation();deleteProject(&apos;${p.id}&apos;)">🗑</button>
+        </div>
+      `).join('');
+    }
+    openModal('modal-projects');
+  });
+}
+
+// ===== Project CRUD =====
+async function createProject() {
+  const theme = document.getElementById('np-theme').value.trim();
+  if (!theme) return alert('请输入主题');
+  const body = {
+    theme,
+    style: document.getElementById('np-style').value,
+    genre: document.getElementById('np-genre').value,
+    duration: parseInt(document.getElementById('np-duration').value) || 15,
+    scene_duration: parseInt(document.getElementById('np-scenedur').value) || 5,
+    n_scenes: parseInt(document.getElementById('np-scenecount').value) || 3,
+    email: document.getElementById('np-email').value.trim(),
+    enable_tts: true,
+    enable_sfx: true,
+  };
+  try {
+    const proj = await api('/api/projects', { method: 'POST', body });
+    closeModal('modal-newproject');
+    await loadProject(proj.id);
+    generateScript();
+  } catch (e) { alert('创建失败：' + e.message); }
+}
+
+async function loadProject(projectId) {
+  closeModal('modal-projects');
+  try {
+    const data = await api(`/api/projects/${projectId}`);
+    currentProject = projectId;
+    meta = data.meta || {};
+    script = data.script || null;
+    charManifest = {};
+    sbManifest = {};
+
+    document.getElementById('script-empty').style.display = 'none';
+    document.getElementById('script-editor').style.display = 'block';
+    document.getElementById('s-theme').value = meta.theme || '';
+    document.getElementById('s-style').value = meta.style || '三渲二国风';
+    document.getElementById('s-genre').value = meta.genre || '仙侠';
+    document.getElementById('s-duration').value = meta.duration || 15;
+    document.getElementById('s-scene-dur').value = String(meta.scene_duration || 5);
+    // Set scene count
+    const nScenes = meta.n_scenes || calcSceneCount(meta.duration || 15, meta.scene_duration || 5);
+    document.getElementById('s-scene-count').value = nScenes;
+    document.getElementById('s-scene-count-hint').textContent = `= ${(meta.duration || 15)}s / ${meta.scene_duration || 5}s = ${nScenes} 镜头`;
+
+    if (script) {
+      renderScriptEditor();
+    } else {
+      document.getElementById('script-content').style.display = 'none';
+    }
+
+    switchTab(0);
+  } catch (e) { alert('加载失败：' + e.message); }
+}
+
+async function deleteProject(projectId) {
+  if (!confirm('确定删除此项目？')) return;
+  await api(`/api/projects/${projectId}`, { method: 'DELETE' });
+  if (currentProject === projectId) {
+    currentProject = null;
+    script = null;
+    document.getElementById('script-empty').style.display = '';
+    document.getElementById('script-editor').style.display = 'none';
+  }
+  openProjectsModal();
+}
+
+// ===== Script Generation =====
+async function generateScript() {
+  if (!currentProject) return;
+  const btn = document.getElementById('btn-gen-script');
+  btn.disabled = true;
+  try {
+    const data = await api(`/api/projects/${currentProject}/script`, { method: 'POST' });
+    pollJob(data.job_id, 'script-job', () => {
+      loadScriptData();
+      btn.disabled = false;
+    });
+  } catch (e) {
+    alert('生成失败：' + e.message);
+    btn.disabled = false;
+  }
+}
+
+async function loadScriptData() {
+  try {
+    script = await api(`/api/projects/${currentProject}/script`);
+    // Update n_scenes in meta to match actual script
+    if (script && script.scenes) {
+      const ms = await api(`/api/projects/${currentProject}`);
+      meta = ms.meta || meta;
+      if (meta) {
+        meta.n_scenes = script.scenes.length;
+        await api(`/api/projects/${currentProject}/meta`, { method: 'PUT', body: meta });
+      }
+    }
+    renderScriptEditor();
+  } catch (e) { /* no script yet */ }
+}
+
+function renderScriptEditor() {
+  if (!script) return;
+  document.getElementById('script-content').style.display = '';
+  document.getElementById('script-title').textContent = script.title || '未命名';
+
+  // Characters
+  const charEl = document.getElementById('script-characters');
+  charEl.innerHTML = (script.characters || []).map((c, i) => `
+    <div style="display:flex; gap:8px; align-items:flex-start; padding:8px; background:var(--surface2); border-radius:8px; margin-bottom:6px">
+      <div style="flex:1">
+        <strong>${c.id}</strong> · ${c.name}
+        <div style="color:var(--text2); font-size:12px; margin-top:2px">${c.visual || ''}</div>
+        <div style="color:var(--text3); font-size:11px">${c.personality || ''} · ${c.age || ''}</div>
+      </div>
+      <button class="btn-secondary btn-small" onclick="editCharacter(${i})">✏️</button>
+      <button class="btn-danger btn-small" onclick="deleteCharacter(${i})">🗑</button>
+    </div>
+  `).join('');
+
+  // Scenes
+  const sceneEl = document.getElementById('script-scenes');
+  sceneEl.innerHTML = (script.scenes || []).map((s, i) => `
+    <div style="padding:10px; background:var(--surface2); border-radius:8px; margin-bottom:6px">
+      <div style="display:flex; justify-content:space-between; align-items:center">
+        <strong>${s.id}</strong>
+        <div style="display:flex; gap:4px">
+          <button class="btn-secondary btn-small" onclick="editScene(${i})">✏️</button>
+          <button class="btn-danger btn-small" onclick="deleteScene(${i})">🗑</button>
+        </div>
+      </div>
+      <div style="color:var(--text2); font-size:13px; margin-top:4px">${s.location} · ${s.time}</div>
+      <div style="font-size:13px; margin-top:2px">${s.action}</div>
+      <div style="color:var(--accent2); font-size:12px; margin-top:2px">
+        ${(s.dialogue || []).map(d => `${d.character}: ${d.text}`).join(' | ')}
+      </div>
+      <div style="color:var(--text3); font-size:11px; margin-top:2px">${s.camera} · ${s.mood}</div>
+    </div>
+  `).join('');
+}
+
+// ===== Script Edit Helpers =====
+function addCharacter() {
+  if (!script) return;
+  const idx = (script.characters || []).length + 1;
+  script.characters = script.characters || [];
+  script.characters.push({ id: `C${idx}`, name: `角色${idx}`, visual: '', personality: '', age: '' });
+  renderScriptEditor();
+  editCharacter(script.characters.length - 1);
+}
+
+function editCharacter(i) {
+  if (!script || !script.characters[i]) return;
+  const c = script.characters[i];
+  document.getElementById('ec-id').value = i;
+  document.getElementById('ec-name').value = c.name || '';
+  document.getElementById('ec-visual').value = c.visual || '';
+  document.getElementById('ec-personality').value = c.personality || '';
+  document.getElementById('ec-age').value = c.age || '';
+  openModal('modal-editchar');
+}
+
+function saveCharacterEdit() {
+  const i = parseInt(document.getElementById('ec-id').value);
+  script.characters[i].name = document.getElementById('ec-name').value;
+  script.characters[i].visual = document.getElementById('ec-visual').value;
+  script.characters[i].personality = document.getElementById('ec-personality').value;
+  script.characters[i].age = document.getElementById('ec-age').value;
+  closeModal('modal-editchar');
+  renderScriptEditor();
+}
+
+function deleteCharacter(i) {
+  if (!confirm('删除此角色？')) return;
+  script.characters.splice(i, 1);
+  renderScriptEditor();
+}
+
+function addScene() {
+  if (!script) return;
+  const idx = (script.scenes || []).length + 1;
+  script.scenes = script.scenes || [];
+  script.scenes.push({
+    id: `S${String(idx).padStart(2, '0')}`,
+    location: '', time: '', characters: [], action: '',
+    dialogue: [], camera: '中景', mood: '紧张'
+  });
+  renderScriptEditor();
+  editScene(script.scenes.length - 1);
+}
+
+function editScene(i) {
+  if (!script || !script.scenes[i]) return;
+  const s = script.scenes[i];
+  document.getElementById('es-id').value = i;
+  document.getElementById('es-sid').value = s.id;
+  document.getElementById('es-location').value = s.location || '';
+  document.getElementById('es-time').value = s.time || '';
+  document.getElementById('es-action').value = s.action || '';
+  document.getElementById('es-camera').value = s.camera || '';
+  document.getElementById('es-mood').value = s.mood || '';
+  document.getElementById('es-chars').value = (s.characters || []).join(',');
+  renderDialogueEditor(s.dialogue || []);
+  openModal('modal-editscene');
+}
+
+function renderDialogueEditor(dialogues) {
+  const el = document.getElementById('es-dialogue');
+  el.innerHTML = dialogues.map((d, i) => `
+    <div class="dialogue-line">
+      <input value="${d.character || ''}" placeholder="角色ID" style="max-width:80px" data-didx="${i}" data-field="character">
+      <input value="${d.text || ''}" placeholder="台词" data-didx="${i}" data-field="text">
+      <button class="btn-danger btn-small" onclick="this.parentElement.remove()">✕</button>
+    </div>
+  `).join('');
+}
+
+function addDialogueLine() {
+  const el = document.getElementById('es-dialogue');
+  const i = el.children.length;
+  el.insertAdjacentHTML('beforeend', `
+    <div class="dialogue-line">
+      <input placeholder="角色ID" style="max-width:80px" data-didx="${i}" data-field="character">
+      <input placeholder="台词" data-didx="${i}" data-field="text">
+      <button class="btn-danger btn-small" onclick="this.parentElement.remove()">✕</button>
+    </div>
+  `);
+}
+
+function saveSceneEdit() {
+  const i = parseInt(document.getElementById('es-id').value);
+  script.scenes[i].id = document.getElementById('es-sid').value;
+  script.scenes[i].location = document.getElementById('es-location').value;
+  script.scenes[i].time = document.getElementById('es-time').value;
+  script.scenes[i].action = document.getElementById('es-action').value;
+  script.scenes[i].camera = document.getElementById('es-camera').value;
+  script.scenes[i].mood = document.getElementById('es-mood').value;
+  script.scenes[i].characters = document.getElementById('es-chars').value.split(',').map(s => s.trim()).filter(Boolean);
+  // Collect dialogue
+  const dialogueEls = document.getElementById('es-dialogue').querySelectorAll('.dialogue-line');
+  script.scenes[i].dialogue = Array.from(dialogueEls).map(el => {
+    const charInput = el.querySelector('[data-field="character"]');
+    const textInput = el.querySelector('[data-field="text"]');
+    return { character: charInput?.value || '', text: textInput?.value || '' };
+  }).filter(d => d.text);
+  closeModal('modal-editscene');
+  renderScriptEditor();
+}
+
+function deleteScene(i) {
+  if (!confirm('删除此场景？')) return;
+  script.scenes.splice(i, 1);
+  renderScriptEditor();
+}
+
+async function saveScript() {
+  if (!currentProject || !script) return;
+  try {
+    await api(`/api/projects/${currentProject}/script`, { method: 'PUT', body: script });
+    alert('✅ 已保存');
+  } catch (e) { alert('保存失败：' + e.message); }
+}
+
+// ===== Characters Panel =====
+async function refreshCharacters() {
+  if (!currentProject || !script) {
+    document.getElementById('chars-empty').style.display = '';
+    document.getElementById('chars-content').style.display = 'none';
+    return;
+  }
+  document.getElementById('chars-empty').style.display = 'none';
+  document.getElementById('chars-content').style.display = '';
+
+  try {
+    const data = await api(`/api/projects/${currentProject}/characters`);
+    const grid = document.getElementById('char-grid');
+    // Build image HTML for each character
+    grid.innerHTML = data.characters.map(c => {
+      const imgs = (c.images || []).map(url => `<img src="${url}" alt="${c.name}" loading="lazy">`).join('');
+      return `
+        <div class="char-card">
+          <div class="char-images">
+            ${imgs || '<div class="no-img">暂无图片<br><small>点击"生成图片"按钮</small></div>'}
+          </div>
+          <div class="char-info">
+            <h3>${c.id} · ${c.name}</h3>
+            <div class="char-detail">${c.visual || ''}</div>
+            <div class="char-actions">
+              <button class="btn-primary btn-small" onclick="generateCharImages('${c.id}')">🎨 生成图片</button>
+              <button class="btn-secondary btn-small" onclick="editCharacterByName('${c.id}')">✏️ 编辑</button>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (e) { /* ignore */ }
+}
+
+async function generateAllCharacters() {
+  if (!currentProject || !script) return;
+  const chars = script.characters || [];
+  if (!chars.length) return alert('请先在脚本中添加角色');
+  // Generate sequentially to avoid overwhelming the API
+  for (const c of chars) {
+    await generateCharImages(c.id);
+  }
+}
+
+async function generateCharImages(cid) {
+  if (!currentProject) return;
+  try {
+    const data = await api(`/api/projects/${currentProject}/characters/${cid}/generate`, { method: 'POST' });
+    pollJob(data.job_id, 'chars-job', () => refreshCharacters());
+  } catch (e) { alert('生成失败：' + e.message); }
+}
+
+function editCharacterByName(cid) {
+  const i = (script.characters || []).findIndex(c => c.id === cid);
+  if (i >= 0) editCharacter(i);
+}
+
+// ===== Production Panel =====
+async function refreshProduction() {
+  if (!currentProject || !script) {
+    document.getElementById('prod-empty').style.display = '';
+    document.getElementById('prod-content').style.display = 'none';
+    return;
+  }
+  document.getElementById('prod-empty').style.display = 'none';
+  document.getElementById('prod-content').style.display = '';
+
+  // Load manifests
+  try { sbManifest = await (await fetch(`${API}/api/projects/${currentProject}/storyboard/manifest`)).json().catch(() => ({})); } catch (e) { sbManifest = {}; }
+
+  const timeline = document.getElementById('timeline');
+  const projUrl = `${API}/api/project-files/${currentProject}/`;
+  timeline.innerHTML = (script.scenes || []).map((s, i) => {
+    const sbInfo = sbManifest[s.id] || {};
+    const sbImg = sbInfo.path ? `${projUrl}storyboard/${s.id}.png` : '';
+    const vidUrl = `${projUrl}videos/${s.id}.mp4`;
+    const dialogue = (s.dialogue || []).map(d => {
+      const charName = (script.characters || []).find(c => c.id === d.character)?.name || d.character;
+      return `${charName}：${d.text}`;
+    }).join(' / ');
+
+    return `
+      <div class="scene-row" draggable="true" data-sid="${s.id}"
+           ondragstart="dragStart(event)" ondragover="dragOver(event)" ondrop="dropScene(event)">
+        <div class="scene-order">⋮<br><span>#${i+1}</span></div>
+        <div class="scene-thumb">
+          ${sbImg ? `<img src="${sbImg}" alt="${s.id}" loading="lazy">` : '<div class="no-thumb">无分镜</div>'}
+        </div>
+        <div class="scene-content">
+          <h4>${s.id} · ${s.location}</h4>
+          <div class="scene-meta">${s.time} · ${s.camera} · ${s.mood}</div>
+          <div style="font-size:13px; margin-bottom:4px">${s.action}</div>
+          ${dialogue ? `<div class="scene-dialogue">${dialogue}</div>` : ''}
+          <div class="scene-actions">
+            <button class="btn-secondary btn-small" onclick="generateStoryboardScene('${s.id}')">🖼️ 分镜</button>
+            <button class="btn-secondary btn-small" onclick="generateVideoScene('${s.id}')">📹 视频</button>
+            <button class="btn-secondary btn-small" onclick="editSceneBySid('${s.id}')">✏️</button>
+            <button class="btn-danger btn-small" onclick="deleteSceneBySid('${s.id}')">🗑</button>
+          </div>
+        </div>
+        <div class="scene-video">
+          <div class="no-video" id="vid-status-${s.id}">
+            <button class="btn-secondary btn-small" onclick="checkVideo('${s.id}')">检查视频</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Check videos
+  (script.scenes || []).forEach(s => checkVideo(s.id));
+
+  // Check final
+  checkFinal();
+}
+
+function checkVideo(sid) {
+  const el = document.getElementById(`vid-status-${sid}`);
+  if (!el) return;
+  fetch(`${API}/api/project-files/${currentProject}/videos/${sid}.mp4`, { method: 'HEAD' })
+    .then(r => {
+      if (r.ok) {
+        el.innerHTML = `<video src="${API}/api/project-files/${currentProject}/videos/${sid}.mp4" preload="metadata" onmouseenter="this.play()" onmouseleave="this.pause();this.currentTime=0"></video>`;
+      }
+    })
+    .catch(() => {});
+}
+
+function checkFinal() {
+  const el = document.getElementById('final-preview');
+  const vid = document.getElementById('final-video');
+  const dl = document.getElementById('final-download');
+
+  const urls = [
+    `${API}/api/project-files/${currentProject}/final_with_audio.mp4`,
+    `${API}/api/project-files/${currentProject}/final.mp4`,
+  ];
+
+  function tryUrl(i) {
+    if (i >= urls.length) { el.style.display = 'none'; return; }
+    fetch(urls[i], { method: 'HEAD' }).then(r => {
+      if (r.ok) {
+        el.style.display = '';
+        vid.src = urls[i];
+        dl.href = urls[i];
+      } else {
+        tryUrl(i + 1);
+      }
+    }).catch(() => tryUrl(i + 1));
+  }
+  tryUrl(0);
+}
+
+// ===== Drag & Drop for Scene Order =====
+let dragSid = null;
+function dragStart(e) { dragSid = e.currentTarget.dataset.sid; e.currentTarget.classList.add('dragging'); }
+function dragOver(e) { e.preventDefault(); }
+function dropScene(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('dragging');
+  const targetSid = e.currentTarget.dataset.sid;
+  if (!dragSid || dragSid === targetSid) return;
+  const order = script.scenes.map(s => s.id);
+  const fromIdx = order.indexOf(dragSid);
+  const toIdx = order.indexOf(targetSid);
+  order.splice(fromIdx, 1);
+  order.splice(toIdx, 0, dragSid);
+  api(`/api/projects/${currentProject}/scenes/order`, { method: 'PUT', body: { order } })
+    .then(() => {
+      const sceneMap = {};
+      script.scenes.forEach(s => sceneMap[s.id] = s);
+      script.scenes = order.map(id => sceneMap[id]);
+      refreshProduction();
+    });
+  dragSid = null;
+}
+
+// ===== Production Actions =====
+async function generateAllStoryboard() {
+  if (!currentProject) return;
+  try {
+    const data = await api(`/api/projects/${currentProject}/storyboard/generate-all`, { method: 'POST' });
+    pollJob(data.job_id, 'prod-job', () => refreshProduction());
+  } catch (e) { alert(e.message); }
+}
+
+async function generateStoryboardScene(sid) {
+  if (!currentProject) return;
+  try {
+    const data = await api(`/api/projects/${currentProject}/storyboard/${sid}/generate`, { method: 'POST' });
+    pollJob(data.job_id, 'prod-job', () => refreshProduction());
+  } catch (e) { alert(e.message); }
+}
+
+async function generateAllVideos() {
+  if (!currentProject) return;
+  try {
+    const data = await api(`/api/projects/${currentProject}/videos/generate-all`, { method: 'POST' });
+    pollJob(data.job_id, 'prod-job', () => refreshProduction());
+  } catch (e) { alert(e.message); }
+}
+
+async function generateVideoScene(sid) {
+  if (!currentProject) return;
+  try {
+    const data = await api(`/api/projects/${currentProject}/videos/${sid}/generate`, { method: 'POST' });
+    pollJob(data.job_id, 'prod-job', () => refreshProduction());
+  } catch (e) { alert(e.message); }
+}
+
+async function renderFinal() {
+  if (!currentProject) return;
+  try {
+    const data = await api(`/api/projects/${currentProject}/render`, { method: 'POST' });
+    pollJob(data.job_id, 'prod-job', () => refreshProduction());
+  } catch (e) { alert(e.message); }
+}
+
+function editSceneBySid(sid) {
+  const i = (script.scenes || []).findIndex(s => s.id === sid);
+  if (i >= 0) editScene(i);
+}
+
+async function deleteSceneBySid(sid) {
+  if (!confirm(`删除场景 ${sid}？`)) return;
+  await api(`/api/projects/${currentProject}/scenes/${sid}`, { method: 'DELETE' });
+  script.scenes = script.scenes.filter(s => s.id !== sid);
+  refreshProduction();
+}
+
+// ===== Auto Mode =====
+function openAutoModal() {
+  document.getElementById('auto-theme').value = '';
+  document.getElementById('auto-email').value = '';
+  document.getElementById('auto-progress').style.display = 'none';
+  ['auto-step1','auto-step2','auto-step3','auto-step4','auto-step5'].forEach(id => {
+    const el = document.getElementById(id);
+    el.className = 'auto-step pending';
+    el.querySelector('.step-icon').textContent = '⏳';
+  });
+  document.getElementById('auto-bar-fill').style.width = '0%';
+  document.getElementById('btn-start-auto').disabled = false;
+  onAutoParamChange();
+  openModal('modal-auto');
+}
+
+async function startAutoMode() {
+  const theme = document.getElementById('auto-theme').value.trim();
+  if (!theme) return alert('请输入主题');
+
+  const style = document.getElementById('auto-style').value;
+  const genre = document.getElementById('auto-genre').value;
+  const duration = parseInt(document.getElementById('auto-duration').value) || 60;
+  const sceneDur = parseInt(document.getElementById('auto-scenedur').value) || 5;
+  const nScenes = parseInt(document.getElementById('auto-scenecount').value) || 3;
+  const email = document.getElementById('auto-email').value.trim();
+
+  // Create project
+  const body = {
+    theme, style, genre,
+    duration, scene_duration: sceneDur, n_scenes: nScenes,
+    email,
+    enable_tts: true, enable_sfx: true,
+  };
+
+  const proj = await api('/api/projects', { method: 'POST', body });
+  currentProject = proj.id;
+
+  // Show progress
+  document.getElementById('auto-progress').style.display = '';
+  document.getElementById('btn-start-auto').disabled = true;
+
+  // Start auto job
+  try {
+    const data = await api(`/api/projects/${currentProject}/auto`, { method: 'POST' });
+    pollAutoJob(data.job_id);
+  } catch (e) {
+    alert('启动失败：' + e.message);
+    document.getElementById('btn-start-auto').disabled = false;
+  }
+}
+
+function setAutoStep(step, status) {
+  const el = document.getElementById(`auto-step${step}`);
+  el.className = `auto-step ${status}`;
+  const icon = el.querySelector('.step-icon');
+  if (status === 'running') icon.textContent = '⏳';
+  else if (status === 'done') icon.textContent = '✅';
+  else if (status === 'failed') icon.textContent = '❌';
+}
+
+function pollAutoJob(jobId) {
+  const interval = setInterval(async () => {
+    try {
+      const job = await api(`/api/jobs/${jobId}`);
+      const logs = job.logs || [];
+      const logsEl = document.getElementById('auto-logs');
+      if (logsEl) logsEl.textContent = logs.slice(-30).join('\n');
+
+      // Parse logs to update steps
+      const logText = logs.join('\n');
+      if (logText.includes('步骤 1/5') || logText.includes('生成剧本')) setAutoStep(1, 'running');
+      if (logText.includes('剧本生成完成') || logText.includes('✅ 剧本')) setAutoStep(1, 'done');
+      if (logText.includes('步骤 2/5') || logText.includes('角色卡')) setAutoStep(2, 'running');
+      if (logText.includes('角色卡生成完成') || logText.includes('✅ 角色卡')) setAutoStep(2, 'done');
+      if (logText.includes('步骤 3/5') || logText.includes('分镜')) setAutoStep(3, 'running');
+      if (logText.includes('分镜关键帧生成完成') || logText.includes('✅ 分镜')) setAutoStep(3, 'done');
+      if (logText.includes('步骤 4/5') || logText.includes('视频')) setAutoStep(4, 'running');
+      if (logText.includes('视频生成完成') || logText.includes('✅ 视频')) setAutoStep(4, 'done');
+      if (logText.includes('步骤 5/5') || logText.includes('拼接成片')) setAutoStep(5, 'running');
+      if (logText.includes('全流程完成') || logText.includes('🎉 全流程')) setAutoStep(5, 'done');
+
+      // Update progress bar
+      let doneCount = 0;
+      for (let i = 1; i <= 5; i++) {
+        const el = document.getElementById(`auto-step${i}`);
+        if (el.classList.contains('done')) doneCount++;
+      }
+      document.getElementById('auto-bar-fill').style.width = `${(doneCount / 5) * 100}%`;
+
+      if (job.status === 'done') {
+        clearInterval(interval);
+        setAutoStep(5, 'done');
+        document.getElementById('auto-bar-fill').style.width = '100%';
+        // Load project and switch to production tab
+        setTimeout(() => {
+          closeModal('modal-auto');
+          loadProject(currentProject);
+          switchTab(2);
+        }, 1000);
+      } else if (job.status === 'failed') {
+        clearInterval(interval);
+        for (let i = 1; i <= 5; i++) {
+          const el = document.getElementById(`auto-step${i}`);
+          if (!el.classList.contains('done') && !el.classList.contains('failed')) {
+            setAutoStep(i, 'failed');
+          }
+        }
+        document.getElementById('btn-start-auto').disabled = false;
+      }
+    } catch (e) {
+      clearInterval(interval);
+    }
+  }, 2000);
+}
+
+// ===== Job Polling =====
+function pollJob(jobId, panelId, onComplete) {
+  const panel = document.getElementById(panelId);
+  panel.style.display = '';
+  panel.innerHTML = '<div class="job-status"><div class="spinner"></div> 执行中...</div><div class="job-logs" id="job-logs"></div>';
+
+  const interval = setInterval(async () => {
+    try {
+      const job = await api(`/api/jobs/${jobId}`);
+      const logs = job.logs || [];
+      const logsEl = document.getElementById('job-logs');
+      if (logsEl) logsEl.textContent = logs.join('\n');
+
+      if (job.status === 'done') {
+        clearInterval(interval);
+        panel.innerHTML = `<div class="job-status" style="color:var(--success)">✅ 完成</div><div class="job-logs">${logs.join('\n')}</div>`;
+        if (onComplete) onComplete();
+      } else if (job.status === 'failed') {
+        clearInterval(interval);
+        panel.innerHTML = `<div class="job-status" style="color:var(--error)">❌ 失败</div><div class="job-logs">${logs.join('\n')}</div>`;
+      }
+    } catch (e) {
+      clearInterval(interval);
+    }
+  }, 2000);
+}
+
+// ===== Init =====
+document.addEventListener('DOMContentLoaded', () => {
+  onScriptParamChange();
+  api('/api/projects').then(data => {
+    if (data.projects && data.projects.length > 0) {
+      loadProject(data.projects[0].id);
+    }
+  }).catch(() => {});
+});
+</script>
+</body>
+</html>
