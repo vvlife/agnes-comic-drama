@@ -141,6 +141,111 @@ def make_job(project_id: str, task_type: str) -> str:
     return job_id
 
 
+def send_completion_email(to_email: str, project_title: str, project_id: str) -> bool:
+    """Send a completion email with download link via Resend API.
+
+    Uses env vars:
+      RESEND_API_KEY  — Resend API key (already configured)
+      EMAIL_FROM      — Verified sender address (e.g. "Agnes漫剧 <noreply@yourdomain.us.kg>")
+    Falls back to generic SMTP if Resend not available:
+      SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, EMAIL_FROM
+    """
+    resend_key = os.environ.get("RESEND_API_KEY", "")
+    email_from = os.environ.get("EMAIL_FROM", "")
+
+    if not email_from:
+        return False
+
+    base_url = os.environ.get("VERCEL_URL", "")
+    if base_url and not base_url.startswith("http"):
+        base_url = f"https://{base_url}"
+    if not base_url:
+        base_url = "https://agnes-comic-drama.vercel.app"
+
+    video_url = f"{base_url}/api/project-files/{project_id}/final_with_audio.mp4"
+    page_url = base_url
+
+    html_body = f"""\
+<div style="font-family: -apple-system, 'Segoe UI', sans-serif; max-width: 560px; margin: 0 auto; background: #13131a; color: #e8e8f0; border-radius: 16px; overflow: hidden;">
+  <div style="background: linear-gradient(135deg, #6c5ce7, #a29bfe); padding: 28px 24px; text-align: center;">
+    <h1 style="margin: 0; font-size: 22px; color: white;">🎬 漫剧生成完成</h1>
+  </div>
+  <div style="padding: 24px;">
+    <p style="font-size: 15px; line-height: 1.6; color: #e8e8f0;">
+      你好！你的 AI 漫剧 <strong style="color: #a29bfe;">「{project_title}」</strong> 已生成完毕。
+    </p>
+    <div style="text-align: center; margin: 24px 0;">
+      <a href="{video_url}" style="display: inline-block; background: #6c5ce7; color: white; padding: 14px 32px; border-radius: 10px; text-decoration: none; font-weight: 700; font-size: 15px;">
+        ⬇️ 下载视频
+      </a>
+    </div>
+    <p style="font-size: 13px; color: #8888a0; line-height: 1.6;">
+      如果按钮无法下载，请复制链接到浏览器：<br>
+      <span style="word-break: break-all; color: #a29bfe;">{video_url}</span>
+    </p>
+    <hr style="border: none; border-top: 1px solid #2a2a3a; margin: 20px 0;">
+    <p style="font-size: 11px; color: #555570; text-align: center;">
+      由 <a href="{page_url}" style="color: #a29bfe;">Agnes 漫剧生成器</a> 自动发送<br>
+      链接有效期取决于服务器缓存，请尽快下载
+    </p>
+  </div>
+</div>
+"""
+
+    # Method 1: Resend HTTP API (preferred for serverless)
+    if resend_key and not email_from.endswith("@resend.dev"):
+        try:
+            resp = http_requests.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {resend_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": email_from,
+                    "to": [to_email],
+                    "subject": f"🎬 漫剧已生成：{project_title}",
+                    "html": html_body,
+                },
+                timeout=30,
+            )
+            if resp.status_code == 200:
+                return True
+            print(f"Resend API error: {resp.status_code} {resp.text}")
+        except Exception as e:
+            print(f"Resend send failed: {e}")
+
+    # Method 2: Generic SMTP fallback
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_pass = os.environ.get("SMTP_PASS", "")
+    if smtp_user and smtp_pass:
+        try:
+            import smtplib
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+
+            smtp_host = os.environ.get("SMTP_HOST", "mail.smtp2go.com")
+            smtp_port = int(os.environ.get("SMTP_PORT", "2525"))
+
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = f"🎬 漫剧已生成：{project_title}"
+            msg["From"] = email_from
+            msg["To"] = to_email
+            msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                server.ehlo()
+                server.starttls()
+                server.ehlo()
+                server.login(smtp_user, smtp_pass)
+                server.sendmail(email_from, [to_email], msg.as_string())
+            return True
+        except Exception as e:
+            print(f"SMTP send failed: {e}")
+
+    return False
+
+
 # ============================================================
 # Routes — Static info
 # ============================================================
@@ -186,9 +291,31 @@ def api_get_config():
     masked = ""
     if key:
         masked = key[:4] + "*" * (len(key) - 8) + key[-4:] if len(key) > 8 else "****"
+
+    email_from = os.environ.get("EMAIL_FROM", "")
+    email_masked = ""
+    resend_key = os.environ.get("RESEND_API_KEY", "")
+    has_email = False
+
+    if email_from and resend_key and not email_from.endswith("@resend.dev"):
+        # Extract email from "Name <email>" format
+        import re as _re
+        m = _re.search(r'<([^>]+)>', email_from)
+        raw = m.group(1) if m else email_from
+        parts = raw.split("@")
+        if len(parts) == 2:
+            email_masked = parts[0][:2] + "***@" + parts[1]
+        else:
+            email_masked = "***"
+        has_email = True
+    elif email_from:
+        email_masked = email_from
+
     return jsonify({
         "AGNES_API_KEY": masked,
         "has_key": bool(key),
+        "EMAIL_FROM": email_masked,
+        "has_email": has_email,
         "platform": "vercel",
     })
 
@@ -250,6 +377,20 @@ def api_test_config():
                 return jsonify({"ok": False, "error": f"HTTP {resp.status}"})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/api/config/test-email", methods=["POST"])
+def api_test_email():
+    """Send a test email to verify Gmail SMTP configuration."""
+    body = request.get_json(force=True, silent=True) or {}
+    test_to = body.get("to", "").strip()
+    if not test_to:
+        return jsonify({"ok": False, "error": "请提供测试收件邮箱地址"})
+
+    ok = send_completion_email(test_to, "测试邮件 - Agnes 漫剧生成器", "test_project")
+    if ok:
+        return jsonify({"ok": True, "message": f"测试邮件已发送到 {test_to}"})
+    return jsonify({"ok": False, "error": "发送失败，请检查 GMAIL_ADDRESS 和 GMAIL_APP_PASSWORD 环境变量"})
 
 
 # ============================================================
@@ -979,6 +1120,20 @@ def api_auto_run(project_id: str):
             jobs[job_id]["status"] = "done"
             jobs[job_id]["result"] = str(result)
             jobs[job_id]["logs"].append("All steps completed!")
+
+            # Send completion email if email was provided
+            email = meta.get("email", "").strip()
+            if email:
+                title = meta.get("theme", "未命名")
+                jobs[job_id]["logs"].append(f"📧 Sending completion email to {email}...")
+                try:
+                    ok = send_completion_email(email, title, project_id)
+                    if ok:
+                        jobs[job_id]["logs"].append(f"✅ Email sent to {email}")
+                    else:
+                        jobs[job_id]["logs"].append("⚠️ Email sending failed (check SMTP config)")
+                except Exception as email_err:
+                    jobs[job_id]["logs"].append(f"⚠️ Email error: {email_err}")
         else:
             jobs[job_id]["status"] = "failed"
             jobs[job_id]["logs"].append("Render failed")

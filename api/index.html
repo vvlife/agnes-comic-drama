@@ -496,9 +496,21 @@ header {
         Vercel 环境下请在 Dashboard → Settings → Environment Variables 中设置 <code style="background:var(--surface2); padding:1px 4px; border-radius:3px">AGNES_API_KEY</code>
       </div>
     </div>
+    <div class="form-group" style="border-top:1px solid var(--border); padding-top:12px; margin-top:12px">
+      <label>邮件通知（Resend）</label>
+      <div id="cfg-email-status" style="font-size:13px; color:var(--text2); margin-bottom:8px">加载中...</div>
+      <div style="display:flex; gap:8px; align-items:center">
+        <input id="cfg-test-email" type="email" placeholder="输入测试收件地址" style="flex:1; padding:8px 10px; font-size:13px; background:var(--bg)">
+        <button style="background:var(--surface2); color:var(--text); padding:8px 14px; border:1px solid var(--border); font-size:12px; white-space:nowrap" onclick="testEmail()">发送测试邮件</button>
+      </div>
+      <div id="cfg-smtp-hint" style="margin-top:6px; font-size:11px; color:var(--text3); display:none">
+        需在 Vercel 环境变量中设置已验证的域名发件人 <code style="background:var(--surface2); padding:1px 4px; border-radius:3px">EMAIL_FROM</code>，
+        如 <code style="background:var(--surface2); padding:1px 4px; border-radius:3px">Agnes漫剧 &lt;noreply@yourdomain.us.kg&gt;</code>
+      </div>
+    </div>
     <div style="display:flex; gap:8px; margin-top:12px">
       <button style="background:var(--accent); color:white; padding:8px 16px; font-weight:600" onclick="saveSettings()">保存</button>
-      <button style="background:var(--surface2); color:var(--text); padding:8px 16px; border:1px solid var(--border)" onclick="testApiKey()">测试</button>
+      <button style="background:var(--surface2); color:var(--text); padding:8px 16px; border:1px solid var(--border)" onclick="testApiKey()">测试 API</button>
       <button style="background:var(--surface2); color:var(--text); padding:8px 16px; border:1px solid var(--border)" onclick="closeModal('modal-settings')">取消</button>
     </div>
     <div id="settings-msg" style="margin-top:8px; font-size:13px"></div>
@@ -854,6 +866,18 @@ function openSettingsModal() {
     document.getElementById('settings-msg').textContent = cfg.has_key ? '✅ 已配置 API Key' : '⚠️ 未配置';
     const hint = document.getElementById('cfg-vercel-hint');
     if (hint) hint.style.display = cfg.platform === 'vercel' ? '' : 'none';
+
+    // Email status
+    const emailStatus = document.getElementById('cfg-email-status');
+    const smtpHint = document.getElementById('cfg-smtp-hint');
+    if (cfg.has_email) {
+      emailStatus.innerHTML = '✅ 已配置邮件发件：<span style="color:var(--accent2)">' + cfg.EMAIL_FROM + '</span>';
+      if (smtpHint) smtpHint.style.display = 'none';
+    } else {
+      emailStatus.innerHTML = '⚠️ 未配置邮件（需验证自定义域名后设置 EMAIL_FROM）';
+      if (smtpHint) smtpHint.style.display = '';
+    }
+
     openModal('modal-settings');
   });
 }
@@ -869,6 +893,15 @@ function testApiKey() {
   document.getElementById('settings-msg').textContent = '测试中...';
   api('/api/config/test', { method: 'POST' }).then(r => {
     document.getElementById('settings-msg').textContent = r.ok ? '✅ API Key 有效' : '❌ ' + r.error;
+  }).catch(e => { document.getElementById('settings-msg').textContent = '❌ ' + e.message; });
+}
+
+function testEmail() {
+  const to = document.getElementById('cfg-test-email').value.trim();
+  if (!to) return alert('请输入测试收件地址');
+  document.getElementById('settings-msg').textContent = '发送测试邮件中...';
+  api('/api/config/test-email', { method: 'POST', body: { to } }).then(r => {
+    document.getElementById('settings-msg').textContent = r.ok ? '✅ ' + r.message : '❌ ' + r.error;
   }).catch(e => { document.getElementById('settings-msg').textContent = '❌ ' + e.message; });
 }
 
