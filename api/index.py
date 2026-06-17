@@ -195,11 +195,37 @@ def api_get_config():
 
 @app.route("/api/config", methods=["POST"])
 def api_set_config():
-    """On Vercel, config cannot be persisted. Return info message."""
-    return jsonify({
-        "ok": False,
-        "message": "Vercel 环境下无法持久化配置。请在 Vercel Dashboard → Settings → Environment Variables 中设置 AGNES_API_KEY。"
-    })
+    """On Vercel, config cannot be persisted to disk. Guide user to env vars."""
+    body = request.get_json(force=True, silent=True) or {}
+    key = body.get("AGNES_API_KEY", "").strip()
+
+    # Check if running on Vercel (read-only filesystem)
+    is_vercel = os.environ.get("VERCEL", "") == "1"
+
+    if is_vercel:
+        existing = os.environ.get("AGNES_API_KEY", "")
+        if existing:
+            return jsonify({
+                "ok": True,
+                "message": "已使用 Vercel 环境变量中预设的 API Key，无需额外配置。"
+            })
+        return jsonify({
+            "ok": False,
+            "message": "Vercel 环境下无法持久化配置。请在 Vercel Dashboard → Settings → Environment Variables 中添加 AGNES_API_KEY。"
+        })
+
+    # Local mode: try to save to config.json
+    try:
+        config_path = API_DIR.parent / "web" / "config.json"
+        cfg = {}
+        if config_path.exists():
+            cfg = json.loads(config_path.read_text())
+        if key:
+            cfg["AGNES_API_KEY"] = key
+        config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2))
+        return jsonify({"ok": True, "message": "已保存"})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
 
 
 @app.route("/api/config/test", methods=["POST"])
