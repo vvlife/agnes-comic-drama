@@ -41,24 +41,32 @@ from agnes_client import AgnesClient
 
 STYLE_PRESETS = {
     "三渲二国风": {
-        "prefix": "三渲二国风动画风格，工笔线条，中国传统审美",
-        "lighting": "柔和自然光，水墨晕染",
-        "palette": "青绿山水色调，朱砂点缀",
+        "prefix": "三渲二国风动画风格，工笔线条，中国传统审美，精致角色设计",
+        "lighting": "电影级光影，柔和自然光配合体积光，水墨晕染质感",
+        "palette": "青绿山水色调，朱砂点缀，金色装饰细节",
+        "quality": "masterpiece, best quality, ultra detailed, professional animation, 8K render, sharp focus",
+        "negative": "low quality, blurry, deformed, ugly, bad anatomy, watermark, text",
     },
     "水墨": {
-        "prefix": "中国水墨画风格，留白意境",
-        "lighting": "墨色浓淡",
-        "palette": "黑白灰为主，偶尔赭石",
+        "prefix": "中国水墨画风格，留白意境，泼墨技法，传统国画美学",
+        "lighting": "墨色浓淡层次，宣纸质感，光影留白",
+        "palette": "黑白灰为主，偶尔赭石与花青点缀",
+        "quality": "masterpiece, ink wash painting, traditional Chinese art, fine brushwork, high resolution",
+        "negative": "low quality, blurry, modern elements, neon colors",
     },
     "赛博朋克": {
-        "prefix": "赛博朋克动画风格，霓虹灯光，未来科技",
-        "lighting": "霓虹光，雨夜反光",
-        "palette": "紫蓝配色，霓虹点缀",
+        "prefix": "赛博朋克动画风格，霓虹灯光，未来科技，暗黑都市",
+        "lighting": "霓虹灯光，雨夜地面反光，全息投影光效",
+        "palette": "紫蓝配色，霓虹粉点缀，深色背景",
+        "quality": "masterpiece, cyberpunk art, neon glow, ultra detailed, cinematic lighting, 8K",
+        "negative": "low quality, blurry, bright daylight, nature scenery",
     },
     "日系动漫": {
-        "prefix": "日系动画风格，精致线条，明亮色彩",
-        "lighting": "柔光晴天",
-        "palette": "明亮动漫配色",
+        "prefix": "日系动画风格，精致线条，明亮色彩，新海诚级画质",
+        "lighting": "柔光晴天，丁达尔效应，镜头光晕",
+        "palette": "明亮动漫配色，天空蓝与樱花粉",
+        "quality": "masterpiece, anime style, Makoto Shinkai quality, vibrant colors, detailed background",
+        "negative": "low quality, blurry, realistic style, dark atmosphere",
     },
 }
 
@@ -173,7 +181,7 @@ def generate_script(client: AgnesClient, theme: str, style: str, genre: str,
     style_info = STYLE_PRESETS.get(style, STYLE_PRESETS["三渲二国风"])
     genre_info = GENRE_PRESETS.get(genre, genre)
 
-    prompt = f"""你是一位专业的漫剧剧本编剧。请根据以下信息生成分幕剧本，输出严格的 JSON 格式。
+    prompt = f"""你是一位专业的漫剧剧本编剧，擅长用画面感极强的文字讲述故事。请根据以下信息生成分幕剧本，输出严格的 JSON 格式。
 
 主题：{theme}
 风格：{style}
@@ -181,32 +189,55 @@ def generate_script(client: AgnesClient, theme: str, style: str, genre: str,
 总镜头数：{n_scenes}
 每镜头时长：{scene_duration}秒
 
+## 叙事结构要求
+- 开头（1-2镜）：建立世界观，展示环境氛围，引入主角
+- 发展（中段）：冲突升级，角色互动，悬念推进
+- 高潮（倒数2-3镜）：最激烈的冲突/对抗/转折
+- 结尾（最后1镜）：情感升华或悬念留白，给观众回味
+
+## 画面描述规范（非常重要！）
+- action 字段必须包含具体的视觉细节：人物动作、表情变化、环境动态（如衣袂飘动、落叶纷飞）
+- 每个 action 都要像一幅画的描述，而非抽象叙事
+- 好的例子："凌寒闭目凝神，残剑骤然爆发刺目光芒，剑气瞬间冻结漫天飞石"
+- 差的例子："凌寒使用绝招打败了对手"
+
+## 对白规范
+- 每句不超过 12 字，简短有力
+- 符合角色性格：高冷角色惜字如金，热血角色语气激昂
+- 不是每个场景都需要对白，纯画面也可以推进叙事
+
+## 镜头语言
+- 丰富多样：交替使用远景/中景/近景/特写/推镜头/摇镜头/俯拍/仰拍
+- 远景用于建立环境，特写用于情感表达
+- 动作场景用快速推镜头，情感场景用缓慢摇镜头
+
 输出格式（严格 JSON）：
 {{
-  "title": "剧名",
+  "title": "剧名（四字或五字，有诗意）",
   "characters": [
-    {{"id": "C1", "name": "角色名", "visual": "详细外观描述（服装/发色/体型/特征）", "personality": "性格气质", "age": "年龄"}}
+    {{"id": "C1", "name": "角色名", "visual": "详细外观（服装颜色材质/发型发色/体型/标志性特征如疤痕/配饰/武器），至少40字", "personality": "性格气质（2-3个关键词）", "age": "年龄"}}
   ],
   "scenes": [
     {{
       "id": "S01",
-      "location": "场景地点",
-      "time": "时间（如清晨/正午/傍晚/深夜）",
+      "location": "场景地点（含环境细节，如'断崖之巅，云海翻涌'）",
+      "time": "时间（清晨薄雾/正午烈日/黄昏残照/深夜月光）",
       "characters": ["C1"],
-      "action": "画面动作描述（不要对白）",
+      "action": "画面动作描述（具体视觉细节，50-80字，像描述一幅画）",
       "dialogue": [{{"character": "C1", "text": "台词"}}],
-      "camera": "镜头运动（如特写/中景/远景/推镜头/摇镜头）",
-      "mood": "氛围（如苍凉/壮阔/温馨/紧张）"
+      "camera": "镜头运动（远景建立/中景叙事/特写表情/推镜头聚焦/摇镜头环顾/仰拍气势/俯拍全局）",
+      "mood": "氛围词（苍凉/壮阔/温馨/紧张/震撼/悲壮/空灵/肃杀）"
     }}
   ]
 }}
 
 要求：
-1. 角色 2-4 个，每个角色要有独特外观特征便于 AI 绘图
-2. 对白简短有力，每句不超过 15 字
-3. 镜头之间有连贯性，有叙事推进
-4. 保留悬念和冲突
-5. 只输出 JSON，不要其他文字"""
+1. 角色 2-4 个，每个角色要有独特且可辨识的外观特征（颜色对比、标志性配饰）
+2. 对白简短有力，每句不超过 12 字
+3. 镜头之间有因果逻辑和叙事推进
+4. 第一个镜头一定是远景，建立场景环境
+5. 最后一个镜头要有情感冲击力
+6. 只输出 JSON，不要其他文字"""
 
     rate_limiter.wait()
     result = client.chat(
@@ -254,18 +285,36 @@ def generate_characters(client: AgnesClient, script: dict, style: str,
     print(f"\n🎨 步骤 2/5：生成角色三联卡（{len(script['characters'])} 个角色）...")
     cp.mark_running("characters")
 
-    style_prefix = STYLE_PRESETS.get(style, STYLE_PRESETS["三渲二国风"])["prefix"]
+    style_info = STYLE_PRESETS.get(style, STYLE_PRESETS["三渲二国风"])
+    style_prefix = style_info["prefix"]
+    quality_tags = style_info.get("quality", "masterpiece, best quality, ultra detailed")
+    negative_tags = style_info.get("negative", "")
+    avoid_hint = f"，avoid: {negative_tags}" if negative_tags else ""
     manifest = {}
 
     for char in script["characters"]:
         cid = char["id"]
         print(f"  生成角色 {char['name']}（{cid}）...")
 
-        # 每种图一张
+        # 每种图一张——全身 / 半身特写 / Q版
         prompts = {
-            "full": f"{style_prefix}，角色全身立绘，{char['visual']}，{char['personality']}气质，站姿，居中构图，纯色背景，高质量角色设定图",
-            "close": f"{style_prefix}，角色半身特写，{char['visual']}，{char['personality']}表情，肩部以上，正面，高质量",
-            "chibi": f"{style_prefix}，Q版头像，{char['visual']}简化版，可爱风格，圆润线条，大眼睛",
+            "full": (
+                f"{style_prefix}，角色全身立绘设定图，{char['visual']}，"
+                f"{char['personality']}气质，优雅站姿，居中对称构图，纯净渐变背景，"
+                f"全身可见，手脚完整，精致服装纹理，{style_info['lighting']}，"
+                f"角色设定画，concept art，{quality_tags}{avoid_hint}"
+            ),
+            "close": (
+                f"{style_prefix}，角色半身特写肖像，{char['visual']}，"
+                f"{char['personality']}神情，肩部以上正面视角，细腻面部表情，"
+                f"眼神光，精致五官，头发丝缕分明，{style_info['lighting']}，"
+                f"portrait，{quality_tags}{avoid_hint}"
+            ),
+            "chibi": (
+                f"{style_prefix}，Q版可爱头像，{char['visual']}简化版，"
+                f"圆润线条，大眼睛，2头身比例，柔和粉嫩配色，"
+                f"简洁纯色背景，chibi character，cute style，{quality_tags}{avoid_hint}"
+            ),
         }
 
         char_images = []
@@ -281,7 +330,7 @@ def generate_characters(client: AgnesClient, script: dict, style: str,
                 client.generate_image_to_file(
                     prompt=prompt,
                     out_path=out_path,
-                    size=IMAGE_SIZES["portrait"],
+                    size=IMAGE_SIZES["landscape"],
                     response_format="url",
                 )
                 char_images.append(str(out_path))
@@ -330,8 +379,19 @@ def generate_storyboard(client: AgnesClient, script: dict, style: str,
             manifest[sid] = {"path": str(out_path), "prompt": ""}
             continue
 
-        # 构建提示词
-        prompt = f"{style_info['prefix']}，{scene['location']}，{scene['time']}。{scene['action']}。{scene['camera']}。{scene['mood']}氛围。{style_info['lighting']}。{style_info['palette']}。"
+        # 构建提示词——层次化：风格→环境→主体→镜头→氛围→品质
+        quality_tags = style_info.get("quality", "masterpiece, best quality")
+        negative_tags = style_info.get("negative", "")
+        avoid_hint = f" avoid: {negative_tags}" if negative_tags else ""
+        prompt = (
+            f"{style_info['prefix']}，"
+            f"场景：{scene['location']}，{scene['time']}，"
+            f"画面主体：{scene['action']}，"
+            f"镜头语言：{scene['camera']}，"
+            f"景深层次，前中后景分明，"
+            f"{scene['mood']}氛围，{style_info['lighting']}，{style_info['palette']}，"
+            f"cinematic composition，dramatic lighting，{quality_tags}{avoid_hint}"
+        )
 
         # 收集该镜出场角色的参考图
         ref_images = []
@@ -352,7 +412,7 @@ def generate_storyboard(client: AgnesClient, script: dict, style: str,
             # 先获取图片 URL，再下载到本地
             img_url = client.generate_image(
                 prompt=prompt,
-                size=IMAGE_SIZES["portrait"],
+                size=IMAGE_SIZES["landscape"],
                 reference_images=ref_images if ref_images else None,
                 response_format="url",
             )
@@ -385,7 +445,8 @@ def generate_storyboard(client: AgnesClient, script: dict, style: str,
 def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
                     vid_dir: pathlib.Path, cp: Checkpoint,
                     rate_limiter: RateLimiter,
-                    scene_duration: int = 5) -> dict:
+                    scene_duration: int = 5,
+                    style: str = "三渲二国风") -> dict:
     """用 agnes-video-v2.0 图生视频。"""
 
     if cp.is_done("videos"):
@@ -399,6 +460,8 @@ def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
                 manifest[sid] = str(vid_path)
         return manifest
 
+    style_info = STYLE_PRESETS.get(style, STYLE_PRESETS["三渲二国风"])
+    quality_tags = style_info.get("quality", "cinematic quality")
     num_frames = SCENE_DURATION_MAP.get(scene_duration, 121)
     print(f"\n📹 步骤 4/5：图生视频（{len(script['scenes'])} 个镜头，每镜头 ~{scene_duration}s / {num_frames}帧）...")
     cp.mark_running("videos")
@@ -423,8 +486,18 @@ def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
             print(f"  ⚠️ {sid} 关键帧不存在，跳过视频生成")
             continue
 
-        # 构建视频提示词
-        video_prompt = f"{scene['action']}，{scene['camera']}，{scene['mood']}氛围，cinematic quality，smooth motion"
+        # 构建视频提示词——强调动态、运镜、氛围
+        action = scene.get('action', '')
+        camera = scene.get('camera', '')
+        mood = scene.get('mood', '')
+        location = scene.get('location', '')
+        video_prompt = (
+            f"{action}，{camera}，"
+            f"smooth fluid motion，natural character movement，"
+            f"hair and clothing dynamics，environmental particle effects，"
+            f"{mood}氛围，{location}，"
+            f"cinematic animation，professional quality，{quality_tags}"
+        )
 
         # 图生视频：优先用 URL，否则用本地文件
         image_input = frame_url if frame_url else frame_path
@@ -435,8 +508,8 @@ def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
                 prompt=video_prompt,
                 out_path=out_path,
                 image=image_input,
-                height=1344,
-                width=768,
+                height=768,
+                width=1344,
                 num_frames=num_frames,
                 frame_rate=24,
             )
@@ -1348,6 +1421,7 @@ def main():
         client, script, sb_manifest,
         project_dir / "videos", cp, rl,
         scene_duration=args.scene_duration,
+        style=args.style,
     )
 
     # Step 5: 成片拼接

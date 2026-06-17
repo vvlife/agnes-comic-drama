@@ -635,6 +635,10 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
         <div class="form-hint" id="np-scenecount-hint"></div>
       </div>
     </div>
+    <div class="form-group">
+      <label>接收邮箱 <span style="color:var(--text2); font-size:12px">（可选，生成完毕后将视频发送到邮箱）</span></label>
+      <input id="np-email" type="email" placeholder="your@email.com">
+    </div>
     <div style="display:flex; gap:8px; margin-top:12px">
       <button class="btn-primary" onclick="createProject()">创建并生成脚本</button>
       <button class="btn-secondary" onclick="closeModal('modal-newproject')">取消</button>
@@ -724,7 +728,7 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
     <div class="form-row">
       <div class="form-group">
         <label>总时长(秒)</label>
-        <input id="auto-duration" type="number" value="15" min="5" max="300" oninput="onAutoParamChange()">
+        <input id="auto-duration" type="number" value="60" min="5" max="300" oninput="onAutoParamChange()">
       </div>
       <div class="form-group">
         <label>单镜头(秒)</label>
@@ -734,8 +738,12 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
       </div>
       <div class="form-group">
         <label>镜头数</label>
-        <input id="auto-scenecount" type="number" value="3" min="1" max="20">
+        <input id="auto-scenecount" type="number" value="12" min="1" max="20">
       </div>
+    </div>
+    <div class="form-group">
+      <label>接收邮箱 <span style="color:var(--text2); font-size:12px">（可选，生成完毕后将视频发送到邮箱）</span></label>
+      <input id="auto-email" type="email" placeholder="your@email.com">
     </div>
     <div style="display:flex; gap:8px; margin-top:12px">
       <button class="btn-primary" id="btn-start-auto" onclick="startAutoMode()">🚀 开始生成</button>
@@ -892,6 +900,7 @@ async function createProject() {
     duration: parseInt(document.getElementById('np-duration').value) || 15,
     scene_duration: parseInt(document.getElementById('np-scenedur').value) || 5,
     n_scenes: parseInt(document.getElementById('np-scenecount').value) || 3,
+    email: document.getElementById('np-email').value.trim(),
     enable_tts: true,
     enable_sfx: true,
   };
@@ -1376,6 +1385,7 @@ async function deleteSceneBySid(sid) {
 // ===== Auto Mode =====
 function openAutoModal() {
   document.getElementById('auto-theme').value = '';
+  document.getElementById('auto-email').value = '';
   document.getElementById('auto-progress').style.display = 'none';
   ['auto-step1','auto-step2','auto-step3','auto-step4','auto-step5'].forEach(id => {
     const el = document.getElementById(id);
@@ -1394,14 +1404,16 @@ async function startAutoMode() {
 
   const style = document.getElementById('auto-style').value;
   const genre = document.getElementById('auto-genre').value;
-  const duration = parseInt(document.getElementById('auto-duration').value) || 15;
+  const duration = parseInt(document.getElementById('auto-duration').value) || 60;
   const sceneDur = parseInt(document.getElementById('auto-scenedur').value) || 5;
   const nScenes = parseInt(document.getElementById('auto-scenecount').value) || 3;
+  const email = document.getElementById('auto-email').value.trim();
 
   // Create project
   const body = {
     theme, style, genre,
     duration, scene_duration: sceneDur, n_scenes: nScenes,
+    email,
     enable_tts: true, enable_sfx: true,
   };
 

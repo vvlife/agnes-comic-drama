@@ -17,6 +17,7 @@ import threading
 import time
 import uuid
 
+import requests
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 
@@ -68,6 +69,84 @@ def load_config() -> dict:
 
 def save_config(cfg: dict):
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+
+
+def send_video_email(to_email: str, project_title: str, video_path: str) -> bool:
+    """通过 Resend API 发送视频邮件。
+
+    Args:
+        to_email: 收件人邮箱
+        project_title: 项目标题
+        video_path: 视频文件路径
+
+    Returns:
+        True 发送成功, False 发送失败
+    """
+    cfg = load_config()
+    resend_key = cfg.get("RESEND_API_KEY", "")
+    email_from = cfg.get("EMAIL_FROM", "Agnes漫剧 <noreply@yourdomain.com>")
+
+    if not resend_key:
+        print("⚠️ 未配置 RESEND_API_KEY，跳过邮件发送")
+        return False
+
+    if not pathlib.Path(video_path).exists():
+        print(f"⚠️ 视频文件不存在：{video_path}")
+        return False
+
+    # 读取视频并 base64 编码
+    import base64
+    video_bytes = pathlib.Path(video_path).read_bytes()
+    video_b64 = base64.b64encode(video_bytes).decode("utf-8")
+    file_size_mb = len(video_bytes) / (1024 * 1024)
+
+    print(f"📧 发送邮件到 {to_email}（视频 {file_size_mb:.1f}MB）...")
+
+    # 构建 Resend API 请求
+    payload = {
+        "from": email_from,
+        "to": [to_email],
+        "subject": f"🎬 您的漫剧已生成完毕：{project_title}",
+        "html": f"""
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+            <h2 style="color: #333;">🎬 您的漫剧「{project_title}」已生成完毕</h2>
+            <p style="color: #666; line-height: 1.6;">
+                您好！您提交的漫剧项目已完成自动生成，视频文件已作为附件随本邮件发送。
+            </p>
+            <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
+                <p style="margin: 0; color: #333;"><strong>项目名称：</strong>{project_title}</p>
+                <p style="margin: 4px 0 0; color: #999; font-size: 12px;">由 Agnes 漫剧生成器自动生成</p>
+            </div>
+            <p style="color: #999; font-size: 12px;">
+                如果附件无法下载，请检查邮件服务商的附件大小限制。
+            </p>
+        </div>
+        """,
+        "attachments": [
+            {
+                "filename": f"{project_title}.mp4",
+                "content": video_b64,
+            }
+        ],
+    }
+
+    try:
+        resp = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {resend_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=120,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        print(f"✅ 邮件发送成功：{data.get('id', '')}")
+        return True
+    except Exception as e:
+        print(f"❌ 邮件发送失败：{e}")
+        return False
 
 
 def get_env():
@@ -269,6 +348,7 @@ def api_create_project():
     n_scenes = int(body.get("n_scenes", 0)) or (duration // scene_duration)
     enable_tts = body.get("enable_tts", True)
     enable_sfx = body.get("enable_sfx", True)
+    email = body.get("email", "").strip()
 
     # Use ASCII-safe slug for project ID
     slug = re.sub(r"[^a-zA-Z0-9]", "-", theme)[:20].strip("-") or "project"
@@ -287,6 +367,7 @@ def api_create_project():
         "enable_tts": enable_tts,
         "enable_sfx": enable_sfx,
         "n_scenes": n_scenes,
+        "email": email,
         "created_at": time.time(),
     }
     (project_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
@@ -755,7 +836,7 @@ def api_generate_storyboard_scene(project_id: str, sid: str):
             rl.wait()
             img_url = client.generate_image(
                 prompt=prompt,
-                size=generator.IMAGE_SIZES["portrait"],
+                size=generator.IMAGE_SIZES["landscape"],
                 reference_images=ref_images if ref_images else None,
                 response_format="url",
             )
@@ -823,6 +904,7 @@ def api_generate_all_videos(project_id: str):
             meta_path = p / "meta.json"
             meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
             scene_duration = meta.get("scene_duration", 5)
+            style = meta.get("style", "三渲二国风")
             sb_manifest = load_sb_manifest(p)
             vid_dir = p / "videos"
 
@@ -830,6 +912,7 @@ def api_generate_all_videos(project_id: str):
                 client, script, sb_manifest,
                 vid_dir, generator.Checkpoint(p), rl,
                 scene_duration=scene_duration,
+                style=style,
             )
             jobs[job_id]["status"] = "done"
             jobs[job_id]["result"] = manifest
@@ -907,8 +990,8 @@ def api_generate_video_scene(project_id: str, sid: str):
                 prompt=video_prompt,
                 out_path=old_vid,
                 image=image_input,
-                height=1344,
-                width=768,
+                height=768,
+                width=1344,
                 num_frames=num_frames,
                 frame_rate=24,
             )
@@ -1290,9 +1373,16 @@ def api_get_config():
     masked = ""
     if api_key:
         masked = api_key[:4] + "*" * (len(api_key) - 8) + api_key[-4:] if len(api_key) > 8 else "****"
+    resend_key = cfg.get("RESEND_API_KEY", "")
+    resend_masked = ""
+    if resend_key:
+        resend_masked = resend_key[:6] + "*" * (len(resend_key) - 10) + resend_key[-4:] if len(resend_key) > 10 else "****"
     return jsonify({
         "AGNES_API_KEY": masked,
         "has_key": bool(api_key),
+        "RESEND_API_KEY": resend_masked,
+        "has_resend_key": bool(resend_key),
+        "EMAIL_FROM": cfg.get("EMAIL_FROM", ""),
     })
 
 
@@ -1306,7 +1396,15 @@ def api_set_config():
             cfg["AGNES_API_KEY"] = key
         else:
             cfg.pop("AGNES_API_KEY", None)
-        save_config(cfg)
+    if "RESEND_API_KEY" in body:
+        key = body["RESEND_API_KEY"].strip()
+        if key:
+            cfg["RESEND_API_KEY"] = key
+        else:
+            cfg.pop("RESEND_API_KEY", None)
+    if "EMAIL_FROM" in body:
+        cfg["EMAIL_FROM"] = body["EMAIL_FROM"].strip()
+    save_config(cfg)
     return jsonify({"ok": True})
 
 
@@ -1420,6 +1518,7 @@ def api_auto_run(project_id: str):
                 client, script, sb_manifest,
                 vid_dir, cp, rl,
                 scene_duration=scene_duration,
+                style=style,
             )
             log(f"✅ 视频生成完成")
 
@@ -1461,6 +1560,24 @@ def api_auto_run(project_id: str):
                 jobs[job_id]["status"] = "done"
                 jobs[job_id]["result"] = str(result)
                 log(f"🎉 全流程完成！")
+
+                # 发送邮件
+                email = meta.get("email", "").strip()
+                if email:
+                    # 优先发送带音频的成片，否则发送无声成片
+                    video_to_send = p / "final_with_audio.mp4"
+                    if not video_to_send.exists():
+                        video_to_send = p / "final.mp4"
+                    if video_to_send.exists():
+                        title = script.get("title", meta.get("theme", "漫剧"))
+                        log(f"📧 正在发送邮件到 {email}...")
+                        ok = send_video_email(email, title, str(video_to_send))
+                        if ok:
+                            log(f"✅ 邮件已发送到 {email}")
+                        else:
+                            log(f"⚠️ 邮件发送失败，请检查 Resend API Key 配置")
+                    else:
+                        log(f"⚠️ 无成片文件可发送")
             else:
                 jobs[job_id]["status"] = "failed"
                 log(f"❌ 成片拼接失败")
