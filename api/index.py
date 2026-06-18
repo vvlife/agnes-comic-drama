@@ -562,8 +562,10 @@ def api_generate_script(project_id: str):
         jobs[job_id]["result"] = script
         jobs[job_id]["logs"].append("Script generation completed")
     except Exception as e:
+        import traceback
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["logs"].append(f"Error: {e}")
+        jobs[job_id]["logs"].append(f"Traceback: {traceback.format_exc()}")
 
     return jsonify({"job_id": job_id, "status": jobs[job_id]["status"]})
 
