@@ -34,6 +34,11 @@ sys.path.insert(0, str(API_DIR))
 import agnes_client
 import run as generator
 
+try:
+    from supabase_storage import get_storage
+except ImportError:
+    get_storage = None
+
 # ============================================================
 # Flask app
 # ============================================================
@@ -139,6 +144,52 @@ def make_job(project_id: str, task_type: str) -> str:
         "created_at": time.time(),
     }
     return job_id
+
+
+# ============================================================
+# Supabase persistence helpers
+# ============================================================
+
+def sync_project_to_supabase(project_id: str):
+    """Upload all project files from /tmp to Supabase for cross-instance persistence."""
+    if not get_storage:
+        return
+    storage = get_storage()
+    if not storage.available:
+        return
+    p = OUTPUT_BASE / project_id
+    if not p.exists():
+        return
+    for fpath in p.rglob("*"):
+        if fpath.is_file() and fpath.stat().st_size < 5_000_000:  # 5MB limit per file
+            rel = fpath.relative_to(p)
+            try:
+                data = fpath.read_bytes()
+                ct = "application/json" if fpath.suffix == ".json" else "image/png" if fpath.suffix == ".png" else "video/mp4" if fpath.suffix == ".mp4" else "application/octet-stream"
+                storage.save_file(f"{project_id}/{rel}", data, ct)
+            except Exception as e:
+                print(f"[supabase] sync save error {rel}: {e}")
+
+
+def restore_project_from_supabase(project_id: str):
+    """Download project files from Supabase to /tmp (if not already present)."""
+    if not get_storage:
+        return
+    storage = get_storage()
+    if not storage.available:
+        return
+    p = OUTPUT_BASE / project_id
+    p.mkdir(parents=True, exist_ok=True)
+    files = storage.list_files(project_id)
+    for f in files:
+        file_path = f.get("file_path", "")
+        local_path = p / file_path
+        if local_path.exists():
+            continue  # Already present
+        data = storage.load_file(f"{project_id}/{file_path}")
+        if data:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            local_path.write_bytes(data)
 
 
 def send_completion_email(to_email: str, project_title: str, project_id: str) -> bool:
@@ -1172,6 +1223,12 @@ def api_auto_step(project_id: str):
     jobs[job_id]["status"] = "running"
     jobs[job_id]["logs"].append(f"Step {step}/5 starting...")
 
+    # Restore from Supabase first (in case we're on a different serverless instance)
+    try:
+        restore_project_from_supabase(project_id)
+    except Exception as e:
+        jobs[job_id]["logs"].append(f"[supabase] restore warning: {e}")
+
     try:
         client, rl = get_client_and_rl()
         meta_path = p / "meta.json"
@@ -1331,6 +1388,13 @@ def api_auto_step(project_id: str):
         jobs[job_id]["status"] = "done"
         next_step = step + 1 if step < 5 else 0
         jobs[job_id]["result"] = {"step": step, "next_step": next_step}
+
+        # Sync files to Supabase for cross-instance persistence
+        try:
+            sync_project_to_supabase(project_id)
+        except Exception as e:
+            jobs[job_id]["logs"].append(f"[supabase] sync warning: {e}")
+
         return jsonify({
             "job_id": job_id,
             "step": step,
@@ -1458,6 +1522,37 @@ def api_generate():
     # Return immediately — use /api/projects/<id>/auto to run the full pipeline
     return jsonify({"job_id": job_id, "project_id": project_id, "status": "pending",
                     "message": "Use /api/projects/{project_id}/auto to start generation"})
+
+
+@app.route("/api/supabase/status", methods=["GET"])
+def api_supabase_status():
+    """Check Supabase connection status."""
+    if not get_storage:
+        return jsonify({"available": False, "reason": "module not loaded"})
+    storage = get_storage()
+    if not storage.available:
+        return jsonify({"available": False, "reason": "not configured (set SUPABASE_URL + SUPABASE_SERVICE_KEY env vars)"})
+    ok = storage.keepalive()
+    return jsonify({"available": True, "connected": ok})
+
+
+@app.route("/api/supabase/keepalive", methods=["POST"])
+def api_supabase_keepalive():
+    """Send a keepalive ping to prevent database from going idle."""
+    if not get_storage:
+        return jsonify({"ok": False, "reason": "module not loaded"}), 503
+    storage = get_storage()
+    if not storage.available:
+        return jsonify({"ok": False, "reason": "not configured"}), 503
+    ok = storage.keepalive()
+    return jsonify({"ok": ok})
+
+
+@app.route("/api/supabase/schema", methods=["GET"])
+def api_supabase_schema():
+    """Return the SQL schema for manual setup."""
+    from supabase_storage import SCHEMA_SQL
+    return SCHEMA_SQL, 200, {"Content-Type": "text/plain; charset=utf-8"}
 
 
 # ============================================================
