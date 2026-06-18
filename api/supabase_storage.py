@@ -235,6 +235,54 @@ class Storage:
         except Exception:
             return False
 
+    def list_projects(self) -> set:
+        """Return set of project_ids that have entries in Supabase."""
+        if not self.client:
+            return set()
+        try:
+            # Get unique project_ids from both tables
+            res1 = self.client.table("project_files").select("project_id").execute()
+            res2 = self.client.table("pipeline_state").select("project_id").execute()
+            ids = set()
+            if res1.data:
+                for row in res1.data:
+                    if row.get("project_id"):
+                        ids.add(row["project_id"])
+            if res2.data:
+                for row in res2.data:
+                    if row.get("project_id"):
+                        ids.add(row["project_id"])
+            return ids
+        except Exception as e:
+            print(f"[supabase] list_projects error: {e}")
+            return set()
+
+    def restore_project(self, project_id: str, local_path: pathlib.Path) -> bool:
+        """Restore project files from Supabase to local path."""
+        if not self.client:
+            return False
+        try:
+            files = self.list_files(project_id)
+            for f in files:
+                fp = f.get("file_path", "")
+                cb = f.get("content_base64", "")
+                if not fp or not cb:
+                    continue
+                target = local_path / fp
+                target.parent.mkdir(parents=True, exist_ok=True)
+                import base64
+                content = base64.b64decode(cb)
+                target.write_bytes(content)
+            # Also restore pipeline state
+            state = self.load_state(project_id)
+            if state:
+                cp_path = local_path / ".checkpoint.json"
+                cp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
+            return True
+        except Exception as e:
+            print(f"[supabase] restore_project error: {e}")
+            return False
+
 
 # Singleton
 _storage: Optional[Storage] = None

@@ -82,10 +82,26 @@ def get_client_and_rl(api_key: str | None = None):
 
 
 def validate_project(project_id: str):
+    # First check local filesystem
     p = OUTPUT_BASE / project_id
-    if not p.exists():
-        return None
-    return p
+    if p.exists():
+        return p
+    # Then check Supabase
+    try:
+        storage = get_storage()
+        if storage:
+            # Check if project exists in Supabase
+            state = storage.get_pipeline_state(project_id)
+            files = storage.list_files(project_id)
+            if state or files:
+                # Create local directory as cache
+                p.mkdir(parents=True, exist_ok=True)
+                # Restore from Supabase
+                storage.restore_project(project_id, p)
+                return p
+    except Exception:
+        pass
+    return None
 
 
 def load_script(project_dir: pathlib.Path) -> dict | None:
@@ -451,20 +467,50 @@ def api_test_email():
 @app.route("/api/projects", methods=["GET"])
 def api_list_projects():
     projects = []
+    
+    # Get projects from Supabase
+    supabase_projects = set()
+    try:
+        storage = get_storage()
+        if storage:
+            supabase_projects = storage.list_projects()
+    except Exception:
+        pass
+    
+    # Get projects from local filesystem
+    local_projects = set()
     if OUTPUT_BASE.exists():
         for d in sorted(OUTPUT_BASE.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
             if d.is_dir():
-                script = load_script(d)
-                projects.append({
-                    "id": d.name,
-                    "title": script.get("title", "") if script else d.name,
-                    "has_script": (d / "script.json").exists(),
-                    "has_characters": (d / "characters" / "manifest.json").exists(),
-                    "has_storyboard": (d / "storyboard" / "manifest.json").exists(),
-                    "has_videos": (d / "videos").exists() and any((d / "videos").glob("*.mp4")),
-                    "has_final": (d / "final.mp4").exists(),
-                    "modified": d.stat().st_mtime,
-                })
+                local_projects.add(d.name)
+    
+    # Merge both sets
+    all_project_ids = supabase_projects.union(local_projects)
+    
+    for pid in all_project_ids:
+        p = OUTPUT_BASE / pid
+        # Ensure local copy exists
+        if pid in supabase_projects and pid not in local_projects:
+            try:
+                storage = get_storage()
+                if storage:
+                    p.mkdir(parents=True, exist_ok=True)
+                    storage.restore_project(pid, p)
+            except Exception:
+                pass
+        
+        script = load_script(p)
+        projects.append({
+            "id": pid,
+            "title": script.get("title", "") if script else pid,
+            "has_script": (p / "script.json").exists(),
+            "has_characters": (p / "characters" / "manifest.json").exists(),
+            "has_storyboard": (p / "storyboard" / "manifest.json").exists(),
+            "has_videos": (p / "videos").exists() and any((p / "videos").glob("*.mp4")),
+            "has_final": (p / "final.mp4").exists(),
+            "modified": time.time(),
+        })
+    
     return jsonify({"projects": projects})
 
 
@@ -503,6 +549,14 @@ def api_create_project():
         "created_at": time.time(),
     }
     (project_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+
+    # Sync to Supabase
+    try:
+        storage = get_storage()
+        if storage:
+            storage.save_state(project_id, step=0, meta=meta)
+    except Exception:
+        pass
 
     return jsonify({"id": project_id, "meta": meta}), 201
 

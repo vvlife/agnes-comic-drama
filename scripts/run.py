@@ -642,7 +642,7 @@ def edit_final(project_dir: pathlib.Path, script: dict, vid_manifest: dict,
     if srt_path.exists() and srt_path.stat().st_size > 0 and final.exists():
         final_sub = project_dir / "final_with_sub.mp4"
         sub_cmd = ["ffmpeg", "-y", "-i", str(final),
-                   "-vf", f"subtitles={srt_path}",
+                   "-vf", f"subtitles={srt_path}:force_style='FontName=WenQuanYi Micro Hei,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'",
                    "-c:v", "libx264", "-preset", "medium", "-crf", "23",
                    "-c:a", "copy", str(final_sub)]
         try:

@@ -94,7 +94,7 @@ class AgnesClient:
         model: str = "agnes-image-2.1-flash",
         reference_images: list[str] | None = None,
         response_format: str = "url",  # "url" or "b64_json"
-        retries: int = 2,
+        retries: int = 3,
     ) -> str:
         """
         文生图 / 图生图。返回图片 URL 或 Base64 字符串。
@@ -116,7 +116,23 @@ class AgnesClient:
         if reference_images:
             # 支持本地文件路径 → data URI 自动转换
             urls = [self._to_data_uri_or_url(img) for img in reference_images]
-            extra_body["image"] = urls
+            # 限制总大小：单张 ≤ 800KB，总计 ≤ 1.5MB（避免 413/400）
+            MAX_SINGLE = 800 * 1024
+            MAX_TOTAL = 1500 * 1024
+            filtered = []
+            total = 0
+            for u in urls:
+                size = len(u) - len("data:image/png;base64,") if u.startswith("data:") else 0
+                if size > MAX_SINGLE:
+                    print(f"  ⚠️ 跳过大尺寸参考图（{size // 1024}KB > {MAX_SINGLE // 1024}KB）")
+                    continue
+                if total + size > MAX_TOTAL and filtered:
+                    print(f"  ⚠️ 已达参考图总大小上限，跳过剩余参考图")
+                    break
+                filtered.append(u)
+                total += size
+            if filtered:
+                extra_body["image"] = filtered
 
         # response_format 必须放在 extra_body 中
         if response_format == "b64_json":
@@ -136,6 +152,21 @@ class AgnesClient:
                     json=body,
                     timeout=TIMEOUT_IMAGE,
                 )
+                if resp.status_code == 413:
+                    # 请求体过大，减少参考图后重试
+                    if extra_body.get("image") and len(extra_body["image"]) > 1:
+                        extra_body["image"] = [extra_body["image"][0]]
+                        print(f"  ⚠️ 请求过大，仅保留第一张参考图重试...")
+                        continue
+                if resp.status_code in (400, 429, 500, 502, 503):
+                    err_body = resp.text[:300]
+                    last_err = RuntimeError(f"HTTP {resp.status_code}: {err_body}")
+                    if attempt < retries - 1:
+                        wait = 10 * (attempt + 1)
+                        print(f"  ⚠️ Image API {resp.status_code}，{wait}s 后重试（{attempt+1}/{retries}）...")
+                        time.sleep(wait)
+                        continue
+                    raise last_err
                 resp.raise_for_status()
                 break
             except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as e:
