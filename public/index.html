@@ -1424,14 +1424,107 @@ async function startAutoMode() {
   document.getElementById('auto-progress').style.display = '';
   document.getElementById('btn-start-auto').disabled = true;
 
-  // Start auto job
+  // Start step-based auto pipeline (each step is a separate API call to avoid Vercel timeout)
   try {
-    const data = await api(`/api/projects/${currentProject}/auto`, { method: 'POST' });
-    pollAutoJob(data.job_id);
+    await runAutoStepPipeline(currentProject, email);
   } catch (e) {
     alert('启动失败：' + e.message);
     document.getElementById('btn-start-auto').disabled = false;
   }
+}
+
+// ===== Step-based Auto Pipeline (for Vercel serverless) =====
+// Each step runs in a separate API call, frontend chains them
+async function runAutoStepPipeline(projectId, email) {
+  let step = 1;
+  const maxRetries = 2;
+
+  while (step <= 5) {
+    setAutoStep(step, 'running');
+    updateAutoProgress(step - 1);
+
+    let retries = 0;
+    let success = false;
+
+    while (retries <= maxRetries) {
+      try {
+        const data = await api(`/api/projects/${projectId}/auto-step`, {
+          method: 'POST',
+          body: { step, email },
+        });
+
+        // Update logs
+        const logsEl = document.getElementById('auto-logs');
+        if (logsEl && data.logs) logsEl.textContent = data.logs.join('\n');
+
+        if (data.status === 'done') {
+          setAutoStep(step, 'done');
+          success = true;
+
+          // Step 4 (videos) may need multiple calls
+          if (step === 4 && data.next_step === 4) {
+            // More videos to generate — stay on step 4
+            success = false; // don't advance yet
+            // But don't retry, just loop again
+            retries = -1; // reset retries for next video
+            // Update step indicator to show progress
+            const logsEl2 = document.getElementById('auto-logs');
+            if (logsEl2) {
+              logsEl2.textContent += '\n⏳ 继续生成下一个视频...';
+            }
+          }
+          break;
+        } else if (data.status === 'failed') {
+          retries++;
+          if (retries <= maxRetries) {
+            const logsEl2 = document.getElementById('auto-logs');
+            if (logsEl2) logsEl2.textContent += `\n⚠️ 步骤${step}失败，重试 ${retries}/${maxRetries}...`;
+            await new Promise(r => setTimeout(r, 3000));
+          }
+        }
+      } catch (e) {
+        retries++;
+        if (retries <= maxRetries) {
+          await new Promise(r => setTimeout(r, 3000));
+        }
+      }
+    }
+
+    if (!success && step !== 4) {
+      setAutoStep(step, 'failed');
+      document.getElementById('btn-start-auto').disabled = false;
+      return;
+    }
+
+    // For step 4, check if all videos done
+    if (step === 4 && !success) {
+      // Check if we actually completed step 4
+      try {
+        const checkData = await api(`/api/projects/${projectId}/auto-step`, {
+          method: 'POST', body: { step: 4, email },
+        });
+        if (checkData.status === 'done' && checkData.next_step === 5) {
+          setAutoStep(4, 'done');
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    step++;
+  }
+
+  updateAutoProgress(5);
+  setTimeout(() => {
+    closeModal('modal-auto');
+    loadProject(projectId);
+    switchTab(2);
+  }, 1500);
+}
+
+function updateAutoProgress(doneSteps) {
+  const pct = (doneSteps / 5) * 100;
+  document.getElementById('auto-bar-fill').style.width = `${pct}%`;
 }
 
 function setAutoStep(step, status) {

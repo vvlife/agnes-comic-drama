@@ -1147,6 +1147,213 @@ def api_auto_run(project_id: str):
 
 
 # ============================================================
+# Routes — Step-based Auto Pipeline (for Vercel serverless)
+# Each step runs in a separate request to avoid timeout
+# ============================================================
+
+@app.route("/api/projects/<project_id>/auto-step", methods=["POST"])
+def api_auto_step(project_id: str):
+    """Run a single step of the auto pipeline.
+    Body: {"step": 1|2|3|4|5, "email": "optional"}
+    Returns: {"step": N, "status": "done|failed", "next_step": N+1|0, "job_id": "...", "logs": [...]}
+    """
+    p = validate_project(project_id)
+    if not p:
+        return jsonify({"error": "项目不存在"}), 404
+
+    body = request.get_json(silent=True) or {}
+    step = int(body.get("step", 0))
+    email = body.get("email", "").strip()
+
+    if step < 1 or step > 5:
+        return jsonify({"error": "step must be 1-5"}), 400
+
+    job_id = make_job(project_id, f"auto-step-{step}")
+    jobs[job_id]["status"] = "running"
+    jobs[job_id]["logs"].append(f"Step {step}/5 starting...")
+
+    try:
+        client, rl = get_client_and_rl()
+        meta_path = p / "meta.json"
+        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+        theme = meta.get("theme", "未命名")
+        style = meta.get("style", "三渲二国风")
+        genre = meta.get("genre", "仙侠")
+        n_scenes = meta.get("n_scenes", 3)
+        scene_duration = meta.get("scene_duration", 5)
+        cp = generator.Checkpoint(p)
+
+        if step == 1:
+            # Step 1: Script
+            jobs[job_id]["logs"].append("正在生成剧本...")
+            script = generator.generate_script(
+                client, theme, style, genre,
+                n_scenes, scene_duration, rl,
+                p / "script.json", cp,
+            )
+            jobs[job_id]["logs"].append(f"剧本完成: {script.get('title', '?')}")
+
+        elif step == 2:
+            # Step 2: Characters
+            script = load_script(p)
+            if not script:
+                raise RuntimeError("脚本不存在，请先执行步骤1")
+            jobs[job_id]["logs"].append("正在生成角色卡...")
+            char_dir = p / "characters"
+            char_dir.mkdir(parents=True, exist_ok=True)
+            char_manifest = generator.generate_characters(
+                client, script, style, char_dir, cp, rl,
+            )
+            jobs[job_id]["logs"].append(f"角色卡完成: {len(char_manifest)}个角色")
+
+        elif step == 3:
+            # Step 3: Storyboard
+            script = load_script(p)
+            if not script:
+                raise RuntimeError("脚本不存在")
+            char_manifest = load_char_manifest(p)
+            jobs[job_id]["logs"].append("正在生成分镜...")
+            sb_dir = p / "storyboard"
+            sb_dir.mkdir(parents=True, exist_ok=True)
+            sb_manifest = generator.generate_storyboard(
+                client, script, style, char_manifest,
+                sb_dir, cp, rl,
+            )
+            jobs[job_id]["logs"].append(f"分镜完成: {len(sb_manifest)}个镜头")
+
+        elif step == 4:
+            # Step 4: Videos (one at a time to stay within timeout)
+            script = load_script(p)
+            if not script:
+                raise RuntimeError("脚本不存在")
+            sb_manifest = load_sb_manifest(p)
+            if not sb_manifest:
+                raise RuntimeError("分镜不存在，请先执行步骤3")
+
+            vid_dir = p / "videos"
+            vid_dir.mkdir(parents=True, exist_ok=True)
+
+            # Find scenes that need video generation
+            scenes_to_gen = []
+            for s in script.get("scenes", []):
+                sid = s["id"]
+                vid_file = vid_dir / f"{sid}.mp4"
+                cp_key = f"videos.{sid}"
+                if not vid_file.exists() and cp.data.get(cp_key) != "done":
+                    scenes_to_gen.append(sid)
+
+            if not scenes_to_gen:
+                jobs[job_id]["logs"].append("所有视频已生成")
+            else:
+                # Generate ONE video per request (to stay within timeout)
+                sid = scenes_to_gen[0]
+                scene = next((s for s in script["scenes"] if s["id"] == sid), None)
+                if not scene:
+                    raise RuntimeError(f"场景 {sid} 不存在")
+
+                frame_info = sb_manifest.get(sid, {})
+                frame_url = frame_info.get("url", "")
+                frame_path = frame_info.get("path", "")
+
+                if not frame_url and not (frame_path and pathlib.Path(frame_path).exists()):
+                    jobs[job_id]["logs"].append(f"场景 {sid} 无分镜帧，跳过")
+                    cp.data[cp_key] = "skipped"
+                    cp.path.write_text(json.dumps(cp.data, ensure_ascii=False, indent=2))
+                else:
+                    jobs[job_id]["logs"].append(f"正在生成视频 {sid}...")
+                    image_input = frame_url if frame_url else frame_path
+                    video_prompt = f"{scene['action']}，{scene['camera']}，{scene.get('mood','')}氛围，cinematic quality，smooth motion"
+                    num_frames = generator.SCENE_DURATION_MAP.get(scene_duration, 121)
+                    vid_path = vid_dir / f"{sid}.mp4"
+
+                    client.generate_video_full(
+                        prompt=video_prompt,
+                        out_path=vid_path,
+                        image=image_input,
+                        height=768,
+                        width=1344,
+                        num_frames=num_frames,
+                        frame_rate=24,
+                    )
+                    cp.data[f"videos.{sid}"] = "done"
+                    cp.path.write_text(json.dumps(cp.data, ensure_ascii=False, indent=2))
+                    jobs[job_id]["logs"].append(f"视频 {sid} 完成")
+
+                # Check if more videos needed
+                remaining = 0
+                for s in script.get("scenes", []):
+                    sid2 = s["id"]
+                    vid_file2 = vid_dir / f"{sid2}.mp4"
+                    if not vid_file2.exists() and cp.data.get(f"videos.{sid2}") != "done" and cp.data.get(f"videos.{sid2}") != "skipped":
+                        remaining += 1
+                if remaining > 0:
+                    jobs[job_id]["logs"].append(f"还有 {remaining} 个视频待生成")
+                    jobs[job_id]["status"] = "done"
+                    jobs[job_id]["result"] = {"step": 4, "next_step": 4, "remaining": remaining}
+                    return jsonify({
+                        "job_id": job_id,
+                        "step": 4,
+                        "status": "done",
+                        "next_step": 4,
+                        "remaining": remaining,
+                        "logs": jobs[job_id]["logs"],
+                    })
+
+        elif step == 5:
+            # Step 5: Render
+            script = load_script(p)
+            if not script:
+                raise RuntimeError("脚本不存在")
+            jobs[job_id]["logs"].append("正在渲染成片...")
+            vid_manifest = {}
+            vid_dir = p / "videos"
+            for s in script.get("scenes", []):
+                sid = s["id"]
+                vid_file = vid_dir / f"{sid}.mp4"
+                if vid_file.exists():
+                    vid_manifest[sid] = {"path": str(vid_file)}
+
+            result = generator.edit_final(
+                p, script, vid_manifest, cp,
+                scene_duration=scene_duration,
+            )
+            jobs[job_id]["logs"].append(f"成片完成: {result}")
+
+            # Send email if provided
+            if email:
+                jobs[job_id]["logs"].append(f"正在发送邮件到 {email}...")
+                try:
+                    ok = send_completion_email(email, theme, project_id)
+                    jobs[job_id]["logs"].append("✅ 邮件发送成功" if ok else "⚠️ 邮件发送失败")
+                except Exception as ee:
+                    jobs[job_id]["logs"].append(f"⚠️ 邮件错误: {ee}")
+
+        jobs[job_id]["status"] = "done"
+        next_step = step + 1 if step < 5 else 0
+        jobs[job_id]["result"] = {"step": step, "next_step": next_step}
+        return jsonify({
+            "job_id": job_id,
+            "step": step,
+            "status": "done",
+            "next_step": next_step,
+            "logs": jobs[job_id]["logs"],
+        })
+
+    except Exception as e:
+        import traceback
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["logs"].append(f"Error: {e}")
+        jobs[job_id]["logs"].append(traceback.format_exc())
+        return jsonify({
+            "job_id": job_id,
+            "step": step,
+            "status": "failed",
+            "next_step": 0,
+            "logs": jobs[job_id]["logs"],
+        })
+
+
+n# ============================================================
 # Routes — File serving
 # ============================================================
 
