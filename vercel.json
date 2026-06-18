@@ -1,1 +1,1 @@
-{"builds": [{"src": "api/index.py", "use": "@vercel/python"}], "routes": [{"src": "/(.*)", "dest": "/api/index.py"}], "functions": {"api/index.py": {"maxDuration": 300}}}
+{"functions": {"api/index.py": {"runtime": "@vercel/python", "maxDuration": 300}}, "routes": [{"src": "/api/(.*)", "dest": "/api/index.py"}, {"src": "/(.*)", "dest": "/public/index.html"}]}
