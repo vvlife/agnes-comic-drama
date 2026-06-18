@@ -247,14 +247,35 @@ def generate_script(client: AgnesClient, theme: str, style: str, genre: str,
         max_tokens=8192,
     )
 
-    # 提取 JSON
-    json_str = result
+    # 提取 JSON — 更健壮的解析逻辑
+    json_str = result.strip()
+    # 1) 去除 markdown 代码块包装
     if "```json" in json_str:
-        json_str = json_str.split("```json")[1].split("```")[0]
+        json_str = json_str.split("```json", 1)[1]
+        # 取第一个 ``` 之前的内容
+        if "```" in json_str:
+            json_str = json_str.split("```", 1)[0]
     elif "```" in json_str:
-        json_str = json_str.split("```")[1].split("```")[0]
-
-    script = json.loads(json_str.strip())
+        parts = json_str.split("```")
+        if len(parts) >= 3:
+            json_str = parts[1]
+    # 2) 定位第一个 { 和最后一个 }，截取纯 JSON
+    first_brace = json_str.find("{")
+    last_brace = json_str.rfind("}")
+    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+        json_str = json_str[first_brace:last_brace + 1]
+    # 3) 去除可能存在的尾部逗号（trailing comma）
+    json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+    # 4) 解析，失败时保存原始响应用于调试
+    try:
+        script = json.loads(json_str.strip())
+    except json.JSONDecodeError as e:
+        # 保存原始响应和清理后的字符串用于调试
+        debug_path = out_path.parent / "_script_debug.txt"
+        debug_path.write_text(f"=== JSON PARSE ERROR ===\n{e}\n\n=== RAW RESPONSE ===\n{result}\n\n=== CLEANED JSON ===\n{json_str}\n")
+        print(f"  ❌ JSON 解析失败: {e}")
+        print(f"  📝 原始响应已保存到: {debug_path}")
+        raise
 
     # 确保每个场景都有 mood 字段
     for scene in script.get("scenes", []):

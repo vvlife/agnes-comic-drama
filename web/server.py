@@ -33,6 +33,9 @@ CONFIG_FILE = SKILL_DIR / "web" / "config.json"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
+
+# Also serve the new public/ directory (one-click UI)
+PUBLIC_DIR = SKILL_DIR / "public"
 CORS(app)
 
 # ============================================================
@@ -72,7 +75,7 @@ def save_config(cfg: dict):
 
 
 def send_video_email(to_email: str, project_title: str, video_path: str) -> bool:
-    """通过 Resend API 发送视频邮件。
+    """通过 Resend API 发送视频邮件（附件模式）。
 
     Args:
         to_email: 收件人邮箱
@@ -84,44 +87,49 @@ def send_video_email(to_email: str, project_title: str, video_path: str) -> bool
     """
     cfg = load_config()
     resend_key = cfg.get("RESEND_API_KEY", "")
-    email_from = cfg.get("EMAIL_FROM", "Agnes漫剧 <noreply@yourdomain.com>")
+    email_from = cfg.get("EMAIL_FROM", "Agnes漫剧 <noreply@publishmy.site>")
 
     if not resend_key:
         print("⚠️ 未配置 RESEND_API_KEY，跳过邮件发送")
         return False
 
-    if not pathlib.Path(video_path).exists():
+    video_file = pathlib.Path(video_path)
+    if not video_file.exists():
         print(f"⚠️ 视频文件不存在：{video_path}")
         return False
 
-    # 读取视频并 base64 编码
     import base64
-    video_bytes = pathlib.Path(video_path).read_bytes()
+    video_bytes = video_file.read_bytes()
     video_b64 = base64.b64encode(video_bytes).decode("utf-8")
     file_size_mb = len(video_bytes) / (1024 * 1024)
 
-    print(f"📧 发送邮件到 {to_email}（视频 {file_size_mb:.1f}MB）...")
+    print(f"📧 发送邮件到 {to_email}（附件 {file_size_mb:.1f}MB）...")
 
-    # 构建 Resend API 请求
+    html_body = f"""\
+<div style="font-family: -apple-system, 'Segoe UI', sans-serif; max-width: 560px; margin: 0 auto; background: #13131a; color: #e8e8f0; border-radius: 16px; overflow: hidden;">
+  <div style="background: linear-gradient(135deg, #6c5ce7, #a29bfe); padding: 28px 24px; text-align: center;">
+    <h1 style="margin: 0; font-size: 22px; color: white;">🎬 漫剧生成完成</h1>
+  </div>
+  <div style="padding: 24px;">
+    <p style="font-size: 15px; line-height: 1.6; color: #e8e8f0;">
+      你好！你的 AI 漫剧 <strong style="color: #a29bfe;">「{project_title}」</strong> 已生成完毕。
+    </p>
+    <p style="font-size: 14px; color: #8888a0; line-height: 1.6;">
+      视频文件（{file_size_mb:.1f} MB）已作为附件随本邮件发送，请下载查看。
+    </p>
+    <hr style="border: none; border-top: 1px solid #2a2a3a; margin: 20px 0;">
+    <p style="font-size: 11px; color: #555570; text-align: center;">
+      由 Agnes 漫剧生成器自动发送
+    </p>
+  </div>
+</div>
+"""
+
     payload = {
         "from": email_from,
         "to": [to_email],
-        "subject": f"🎬 您的漫剧已生成完毕：{project_title}",
-        "html": f"""
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2 style="color: #333;">🎬 您的漫剧「{project_title}」已生成完毕</h2>
-            <p style="color: #666; line-height: 1.6;">
-                您好！您提交的漫剧项目已完成自动生成，视频文件已作为附件随本邮件发送。
-            </p>
-            <div style="background: #f5f5f5; padding: 16px; border-radius: 8px; margin: 16px 0;">
-                <p style="margin: 0; color: #333;"><strong>项目名称：</strong>{project_title}</p>
-                <p style="margin: 4px 0 0; color: #999; font-size: 12px;">由 Agnes 漫剧生成器自动生成</p>
-            </div>
-            <p style="color: #999; font-size: 12px;">
-                如果附件无法下载，请检查邮件服务商的附件大小限制。
-            </p>
-        </div>
-        """,
+        "subject": f"🎬 漫剧已生成：{project_title}",
+        "html": html_body,
         "attachments": [
             {
                 "filename": f"{project_title}.mp4",
@@ -138,12 +146,15 @@ def send_video_email(to_email: str, project_title: str, video_path: str) -> bool
                 "Content-Type": "application/json",
             },
             json=payload,
-            timeout=120,
+            timeout=30,
         )
-        resp.raise_for_status()
-        data = resp.json()
-        print(f"✅ 邮件发送成功：{data.get('id', '')}")
-        return True
+        if resp.status_code == 200:
+            data = resp.json()
+            print(f"✅ 邮件发送成功：{data.get('id', '')}")
+            return True
+        else:
+            print(f"❌ Resend API 错误：{resp.status_code} {resp.text}")
+            return False
     except Exception as e:
         print(f"❌ 邮件发送失败：{e}")
         return False
@@ -284,7 +295,8 @@ def start_background_task(project_id: str, task_type: str, target_func, *args, *
 
 @app.route("/")
 def index():
-    return send_from_directory(app.static_folder, "index.html")
+    # Serve the new one-click UI from public/index.html
+    return send_from_directory(PUBLIC_DIR, "index.html")
 
 
 # ============================================================
@@ -1432,7 +1444,39 @@ def api_test_config():
         return jsonify({"ok": False, "error": str(e)})
 
 
-# ============================================================
+# ====================================================================
+# 路由 — 邮件测试
+# ====================================================================
+
+@app.route("/api/config/test-email", methods=["POST"])
+def api_test_email():
+    """发送测试邮件验证 Resend API 配置。"""
+    body = request.get_json(force=True) or {}
+    test_to = body.get("to", "").strip()
+    if not test_to:
+        return jsonify({"ok": False, "error": "请提供收件人邮箱"}), 400
+    # 测试邮件：找一个已生成的视频文件作为附件，没有则跳过
+    test_video = None
+    for proj_dir in OUTPUT_BASE.iterdir():
+        if not proj_dir.is_dir():
+            continue
+        for name in ("final_with_audio.mp4", "final.mp4"):
+            candidate = proj_dir / name
+            if candidate.exists() and candidate.stat().st_size > 0:
+                test_video = str(candidate)
+                break
+        if test_video:
+            break
+    if not test_video:
+        return jsonify({"ok": False, "error": "未找到已生成的视频文件用于测试，请先运行一次漫剧生成"}), 400
+    ok = send_video_email(test_to, "测试邮件 - Agnes 漫剧生成器", test_video)
+    if ok:
+        return jsonify({"ok": True, "message": f"测试邮件已发送到 {test_to}"})
+    else:
+        return jsonify({"ok": False, "error": "邮件发送失败，请检查 Resend API Key 和 EMAIL_FROM 配置"})
+
+
+# ====================================================================
 # 路由 — 自动模式（一键到底）
 # ============================================================
 
