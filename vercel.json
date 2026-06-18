@@ -1,1 +1,11 @@
-{"functions": {"api/index.py": {"runtime": "python3.12", "maxDuration": 300}}, "routes": [{"src": "/api/(.*)", "dest": "/api/index.py"}, {"src": "/(.*)", "dest": "/public/index.html"}]}
+{
+  "functions": {
+    "api/index.py": {
+      "maxDuration": 300
+    }
+  },
+  "routes": [
+    { "src": "/api/(.*)", "dest": "/api/index.py" },
+    { "src": "/(.*)", "dest": "/public/index.html" }
+  ]
+}
