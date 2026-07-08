@@ -339,6 +339,7 @@ def generate_characters(client: AgnesClient, script: dict, style: str,
         }
 
         char_images = []
+        errors = []
         for img_type, prompt in prompts.items():
             out_path = char_dir / f"{cid}_{img_type}.png"
             if out_path.exists():
@@ -358,6 +359,12 @@ def generate_characters(client: AgnesClient, script: dict, style: str,
                 print(f"    ✅ {img_type}")
             except Exception as e:
                 print(f"    ❌ {img_type} 失败：{e}")
+                errors.append(f"{img_type}: {e}")
+
+        if not char_images:
+            raise RuntimeError(
+                f"角色 {char['name']}（{cid}）所有图片生成失败：" + "；".join(errors)
+            )
 
         manifest[cid] = {
             "name": char["name"],
@@ -449,6 +456,8 @@ def generate_storyboard(client: AgnesClient, script: dict, style: str,
         except Exception as e:
             print(f"  ❌ {sid} 失败：{e}")
             manifest[sid] = {"path": "", "prompt": prompt, "error": str(e)}
+            # 让错误冒泡，便于上层记录真实原因
+            raise RuntimeError(f"分镜 {sid} 生成失败：{e}")
 
         # 镜头级 checkpoint
         cp.data[f"storyboard.{sid}"] = "done"
