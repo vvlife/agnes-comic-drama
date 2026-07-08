@@ -241,19 +241,34 @@ class AgnesClient:
         if negative_prompt:
             body["negative_prompt"] = negative_prompt
 
-        resp = requests.post(
-            f"{self.base_url}/videos",
-            headers=self.headers,
-            json=body,
-            timeout=TIMEOUT_VIDEO_SUBMIT,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        task_id = data.get("task_id") or data.get("id", "")
-        video_id = data.get("video_id", "")
-        if not video_id:
-            raise RuntimeError(f"视频提交响应缺少 video_id：{data}")
-        return task_id, video_id
+        last_err = None
+        for attempt in range(4):
+            try:
+                resp = requests.post(
+                    f"{self.base_url}/videos",
+                    headers=self.headers,
+                    json=body,
+                    timeout=TIMEOUT_VIDEO_SUBMIT,
+                )
+                if resp.status_code in (429, 500, 502, 503, 504):
+                    last_err = f"HTTP {resp.status_code}"
+                    wait = 10 * (attempt + 1)
+                    print(f"  ⚠️ 视频提交返回 {resp.status_code}，{wait}s 后重试（{attempt+1}/4）...")
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                data = resp.json()
+                task_id = data.get("task_id") or data.get("id", "")
+                video_id = data.get("video_id", "")
+                if not video_id:
+                    raise RuntimeError(f"视频提交响应缺少 video_id：{data}")
+                return task_id, video_id
+            except (requests.exceptions.ReadTimeout, requests.exceptions.ConnectionError) as e:
+                last_err = e
+                wait = 10 * (attempt + 1)
+                print(f"  ⚠️ 视频提交网络错误，{wait}s 后重试（{attempt+1}/4）...")
+                time.sleep(wait)
+        raise RuntimeError(f"视频提交 4 次均失败: {last_err}")
 
     def poll_video(
         self,
@@ -276,6 +291,10 @@ class AgnesClient:
                     headers=self.headers,
                     timeout=TIMEOUT_VIDEO_POLL,
                 )
+                if resp.status_code in (429, 500, 502, 503, 504):
+                    print(f"  轮询返回 {resp.status_code}，稍后重试...")
+                    time.sleep(5)
+                    continue
                 resp.raise_for_status()
                 data = resp.json()
             except Exception as e:
