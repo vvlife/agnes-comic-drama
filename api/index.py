@@ -166,8 +166,18 @@ def make_job(project_id: str, task_type: str) -> str:
 # Supabase persistence helpers
 # ============================================================
 
+# Max file size we persist to Supabase Postgres (base64-in-row).
+# Postgres rows are limited; keep JSON + small images under this cap.
+# Large binaries (videos) are skipped here — see note in validate_project.
+SUPABASE_SYNC_MAX_BYTES = 25_000_000  # 25MB
+
+
 def sync_project_to_supabase(project_id: str):
-    """Upload all project files from /tmp to Supabase for cross-instance persistence."""
+    """Upload all project files from /tmp to Supabase for cross-instance persistence.
+
+    Files > SUPABASE_SYNC_MAX_BYTES (e.g. generated videos) are skipped to avoid
+    blowing the Postgres row size limit. Meta/script/manifests/png frames are synced.
+    """
     if not get_storage:
         return
     storage = get_storage()
@@ -177,14 +187,19 @@ def sync_project_to_supabase(project_id: str):
     if not p.exists():
         return
     for fpath in p.rglob("*"):
-        if fpath.is_file() and fpath.stat().st_size < 5_000_000:  # 5MB limit per file
-            rel = fpath.relative_to(p)
-            try:
-                data = fpath.read_bytes()
-                ct = "application/json" if fpath.suffix == ".json" else "image/png" if fpath.suffix == ".png" else "video/mp4" if fpath.suffix == ".mp4" else "application/octet-stream"
-                storage.save_file(f"{project_id}/{rel}", data, ct)
-            except Exception as e:
-                print(f"[supabase] sync save error {rel}: {e}")
+        if not fpath.is_file():
+            continue
+        size = fpath.stat().st_size
+        if size >= SUPABASE_SYNC_MAX_BYTES:
+            print(f"[supabase] skip large file {fpath.relative_to(p)} ({size} bytes)")
+            continue
+        rel = fpath.relative_to(p)
+        try:
+            data = fpath.read_bytes()
+            ct = "application/json" if fpath.suffix == ".json" else "image/png" if fpath.suffix == ".png" else "video/mp4" if fpath.suffix == ".mp4" else "application/octet-stream"
+            storage.save_file(f"{project_id}/{rel}", data, ct)
+        except Exception as e:
+            print(f"[supabase] sync save error {rel}: {e}")
 
 
 def restore_project_from_supabase(project_id: str):
@@ -625,6 +640,10 @@ def api_update_meta(project_id: str):
     for k, v in body.items():
         meta[k] = v
     meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2))
+    try:
+        sync_project_to_supabase(project_id)
+    except Exception:
+        pass
     return jsonify({"ok": True})
 
 
@@ -706,6 +725,10 @@ def api_update_script(project_id: str):
     if not body:
         return jsonify({"error": "无效数据"}), 400
     save_script(p, body)
+    try:
+        sync_project_to_supabase(project_id)
+    except Exception:
+        pass
     return jsonify({"ok": True})
 
 
@@ -808,6 +831,10 @@ def api_generate_character(project_id: str, cid: str):
         jobs[job_id]["status"] = "done"
         jobs[job_id]["result"] = manifest
         jobs[job_id]["logs"].append(f"Character {char_info['name']} generation completed")
+        try:
+            sync_project_to_supabase(project_id)
+        except Exception:
+            pass
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["logs"].append(f"Error: {e}")
@@ -863,6 +890,10 @@ def api_generate_all_storyboard(project_id: str):
         jobs[job_id]["status"] = "done"
         jobs[job_id]["result"] = manifest
         jobs[job_id]["logs"].append("Storyboard generation completed")
+        try:
+            sync_project_to_supabase(project_id)
+        except Exception:
+            pass
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["logs"].append(f"Error: {e}")
@@ -941,6 +972,10 @@ def api_generate_storyboard_scene(project_id: str, sid: str):
 
         jobs[job_id]["status"] = "done"
         jobs[job_id]["logs"].append(f"Scene {sid} storyboard generated")
+        try:
+            sync_project_to_supabase(project_id)
+        except Exception:
+            pass
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["logs"].append(f"Error: {e}")
@@ -991,6 +1026,10 @@ def api_generate_all_videos(project_id: str):
         jobs[job_id]["status"] = "done"
         jobs[job_id]["result"] = manifest
         jobs[job_id]["logs"].append("All videos generated")
+        try:
+            sync_project_to_supabase(project_id)
+        except Exception:
+            pass
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["logs"].append(f"Error: {e}")
@@ -1059,6 +1098,10 @@ def api_generate_video_scene(project_id: str, sid: str):
 
         jobs[job_id]["status"] = "done"
         jobs[job_id]["logs"].append(f"Scene {sid} video generated")
+        try:
+            sync_project_to_supabase(project_id)
+        except Exception:
+            pass
     except Exception as e:
         jobs[job_id]["status"] = "failed"
         jobs[job_id]["logs"].append(f"Error: {e}")
@@ -1107,6 +1150,10 @@ def api_render(project_id: str):
             jobs[job_id]["status"] = "done"
             jobs[job_id]["result"] = str(result)
             jobs[job_id]["logs"].append("Final video rendered")
+            try:
+                sync_project_to_supabase(project_id)
+            except Exception:
+                pass
         else:
             jobs[job_id]["status"] = "failed"
             jobs[job_id]["logs"].append("Render failed — no output")
