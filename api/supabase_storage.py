@@ -263,21 +263,26 @@ class Storage:
             return False
         try:
             files = self.list_files(project_id)
+            restored = 0
             for f in files:
                 fp = f.get("file_path", "")
-                cb = f.get("content_base64", "")
-                if not fp or not cb:
+                if not fp:
+                    continue
+                # list_files does NOT return the base64 body; fetch it per-file.
+                content = self.load_file(f"{project_id}/{fp}")
+                if not content:
+                    print(f"[supabase] restore: no content for {fp}, skipping")
                     continue
                 target = local_path / fp
                 target.parent.mkdir(parents=True, exist_ok=True)
-                import base64
-                content = base64.b64decode(cb)
                 target.write_bytes(content)
-            # Also restore pipeline state
+                restored += 1
+            # Also restore pipeline state (as .checkpoint.json)
             state = self.load_state(project_id)
             if state:
                 cp_path = local_path / ".checkpoint.json"
                 cp_path.write_text(json.dumps(state, ensure_ascii=False, indent=2))
+            print(f"[supabase] restore_project: restored {restored} files for {project_id}")
             return True
         except Exception as e:
             print(f"[supabase] restore_project error: {e}")

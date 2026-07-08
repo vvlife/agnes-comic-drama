@@ -91,7 +91,7 @@ def validate_project(project_id: str):
         storage = get_storage()
         if storage:
             # Check if project exists in Supabase
-            state = storage.get_pipeline_state(project_id)
+            state = storage.load_state(project_id)
             files = storage.list_files(project_id)
             if state or files:
                 # Create local directory as cache
