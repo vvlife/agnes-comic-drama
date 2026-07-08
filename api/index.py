@@ -1025,6 +1025,11 @@ def api_generate_all_videos(project_id: str):
         )
         jobs[job_id]["status"] = "done"
         jobs[job_id]["result"] = manifest
+        # Diagnostic: report actual on-disk video files
+        for sc in script.get("scenes", []):
+            sid = sc["id"]
+            vp = vid_dir / f"{sid}.mp4"
+            jobs[job_id]["logs"].append(f"video {sid}: exists={vp.exists()}")
         jobs[job_id]["logs"].append("All videos generated")
         try:
             sync_project_to_supabase(project_id)
