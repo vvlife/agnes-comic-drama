@@ -558,6 +558,12 @@ def api_create_project():
     except Exception:
         pass
 
+    # Persist meta.json + checkpoint to Supabase for cross-instance recovery
+    try:
+        sync_project_to_supabase(project_id)
+    except Exception:
+        pass
+
     return jsonify({"id": project_id, "meta": meta}), 201
 
 
@@ -666,6 +672,11 @@ def api_generate_script(project_id: str):
         jobs[job_id]["status"] = "done"
         jobs[job_id]["result"] = script
         jobs[job_id]["logs"].append("Script generation completed")
+        # Persist generated script to Supabase for cross-instance recovery
+        try:
+            sync_project_to_supabase(project_id)
+        except Exception:
+            pass
     except Exception as e:
         import traceback
         jobs[job_id]["status"] = "failed"
