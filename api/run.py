@@ -513,8 +513,9 @@ def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
         frame_url = frame_info.get("url", "")  # 优先用远程 URL
         frame_path = frame_info.get("path", "")
         if not frame_url and not (frame_path and pathlib.Path(frame_path).exists()):
-            print(f"  ⚠️ {sid} 关键帧不存在，跳过视频生成")
-            continue
+            raise RuntimeError(
+                f"{sid} 关键帧不存在（url={frame_url!r}, path={frame_path!r}），无法生成视频"
+            )
 
         # 构建视频提示词——强调动态、运镜、氛围
         action = scene.get('action', '')
@@ -549,6 +550,7 @@ def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
             print(f"  ✅ {sid}")
         except Exception as e:
             print(f"  ❌ {sid} 失败：{e}")
+            raise RuntimeError(f"视频 {sid} 生成失败：{e}")
 
     cp.mark_done("videos")
     print(f"  ✅ 视频已保存：{vid_dir}")
