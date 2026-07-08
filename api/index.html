@@ -390,7 +390,7 @@ header {
           <div class="card">
             <div class="card-title">🎬 <span id="script-title"></span>
               <span style="flex:1"></span>
-              <button style="background:var(--surface2); color:var(--text); padding:6px 12px; border:1px solid var(--border)" onclick="saveScript()">💾 保存</button>
+              <button style="background:var(--surface2); color:var(--text); padding:6px 12px; border:1px solid var(--border)" id="btn-save-script" onclick="saveScript()">💾 保存</button>
             </div>
           </div>
           <div class="card">
@@ -433,7 +433,7 @@ header {
         <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap">
           <button style="background:var(--accent); color:white; padding:8px 16px" onclick="generateAllStoryboard()">🖼️ 生成分镜</button>
           <button style="background:var(--accent); color:white; padding:8px 16px" onclick="generateAllVideos()">📹 生成视频</button>
-          <button style="background:var(--success); color:white; padding:8px 16px" onclick="renderFinal()">🎬 拼接成片</button>
+          <button style="background:var(--success); color:white; padding:8px 16px" id="btn-render-final" onclick="renderFinal()">🎬 拼接成片</button>
         </div>
         <div id="timeline" style="display:flex; flex-direction:column; gap:10px"></div>
         <div id="final-preview" style="display:none; margin-top:16px">
@@ -673,17 +673,53 @@ function closeVideoPreview() {
 
 // ===== API =====
 const API = '';
-async function api(path, opts = {}) {
-  const res = await fetch(API + path, {
-    headers: { 'Content-Type': 'application/json' },
-    method: opts.method || 'GET',
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || res.statusText);
+
+// ===== Global loading indicator (ref-counted) =====
+let __pendingRequests = 0;
+function showGlobalLoading() {
+  const el = document.getElementById('global-loading');
+  if (el) el.classList.add('show');
+}
+function hideGlobalLoading() {
+  __pendingRequests = Math.max(0, __pendingRequests - 1);
+  if (__pendingRequests === 0) {
+    const el = document.getElementById('global-loading');
+    if (el) el.classList.remove('show');
   }
-  return res.json();
+}
+
+async function api(path, opts = {}) {
+  __pendingRequests++;
+  showGlobalLoading();
+  try {
+    const res = await fetch(API + path, {
+      headers: { 'Content-Type': 'application/json' },
+      method: opts.method || 'GET',
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || res.statusText);
+    }
+    return res.json();
+  } finally {
+    hideGlobalLoading();
+  }
+}
+
+// Toggle a button's busy state (spinner + text), preserving original label
+function setBusy(btn, busy, busyText) {
+  if (!btn) return;
+  if (busy) {
+    if (btn.dataset.label === undefined) btn.dataset.label = btn.innerHTML;
+    btn.classList.add('busy');
+    btn.disabled = true;
+    if (busyText) btn.innerHTML = busyText;
+  } else {
+    btn.classList.remove('busy');
+    btn.disabled = false;
+    if (btn.dataset.label !== undefined) btn.innerHTML = btn.dataset.label;
+  }
 }
 
 // ===== Simple Mode: Generate =====
@@ -695,7 +731,7 @@ async function startGenerate() {
   if (!theme) return alert('请输入主题');
 
   const btn = document.getElementById('btn-main-gen');
-  btn.disabled = true;
+  setBusy(btn, true, '⏳ 启动生成中…');
 
   try {
     const body = {
@@ -723,7 +759,7 @@ async function startGenerate() {
     pollAutoJob(data.job_id);
   } catch (e) {
     alert('启动失败：' + e.message);
-    btn.disabled = false;
+    setBusy(btn, false);
   }
 }
 
@@ -961,11 +997,11 @@ async function loadProject(projectId) {
 async function generateScript() {
   if (!currentProject) return;
   const btn = document.getElementById('btn-gen-script');
-  btn.disabled = true;
+  setBusy(btn, true, '⏳ 生成脚本中…');
   try {
     const data = await api(`/api/projects/${currentProject}/script`, { method: 'POST' });
-    pollJob(data.job_id, 'script-job', () => { loadScriptData(); btn.disabled = false; });
-  } catch (e) { alert('生成失败：' + e.message); btn.disabled = false; }
+    pollJob(data.job_id, 'script-job', () => { loadScriptData(); setBusy(btn, false); });
+  } catch (e) { alert('生成失败：' + e.message); setBusy(btn, false); }
 }
 
 async function loadScriptData() {
@@ -1025,8 +1061,11 @@ function delSceneAdv(i) { if (confirm('删除？')) { script.scenes.splice(i, 1)
 
 async function saveScript() {
   if (!currentProject || !script) return;
+  const btn = document.getElementById('btn-save-script');
+  setBusy(btn, true, '⏳ 保存中…');
   try { await api(`/api/projects/${currentProject}/script`, { method: 'PUT', body: script }); alert('✅ 已保存'); }
   catch (e) { alert('保存失败：' + e.message); }
+  finally { setBusy(btn, false); }
 }
 
 // ===== Advanced: Characters =====
@@ -1044,7 +1083,7 @@ async function refreshCharacters() {
         </div>
         <div style="padding:10px">
           <div style="font-weight:600; margin-bottom:6px">${c.id} · ${c.name}</div>
-          <button style="background:var(--accent); color:white; padding:6px 12px; font-size:12px" onclick="genChar('${c.id}')">🎨 生成</button>
+          <button style="background:var(--accent); color:white; padding:6px 12px; font-size:12px" onclick="genChar('${c.id}', this)">🎨 生成</button>
         </div>
       </div>`;
     }).join('');
@@ -1053,13 +1092,18 @@ async function refreshCharacters() {
 
 async function generateAllCharacters() {
   if (!script) return;
-  for (const c of (script.characters || [])) await genChar(c.id);
+  const btn = document.getElementById('btn-gen-all-chars');
+  setBusy(btn, true, '⏳ 生成角色卡中…');
+  try {
+    for (const c of (script.characters || [])) await genChar(c.id);
+  } finally { setBusy(btn, false); }
 }
-async function genChar(cid) {
+async function genChar(cid, btn) {
+  setBusy(btn, true, '⏳ 生成中');
   try {
     const data = await api(`/api/projects/${currentProject}/characters/${cid}/generate`, { method: 'POST' });
-    pollJob(data.job_id, 'chars-job', () => refreshCharacters());
-  } catch (e) { alert(e.message); }
+    pollJob(data.job_id, 'chars-job', () => { refreshCharacters(); setBusy(btn, false); });
+  } catch (e) { alert(e.message); setBusy(btn, false); }
 }
 
 // ===== Advanced: Production =====
@@ -1080,8 +1124,8 @@ async function refreshProduction() {
         <strong>${s.id}</strong> · ${s.location}<br>
         <span style="color:var(--text2); font-size:12px">${s.action?.substring(0, 50)}...</span>
         <div style="margin-top:6px; display:flex; gap:4px">
-          <button style="background:var(--surface3); color:var(--text); padding:4px 10px; border:1px solid var(--border); font-size:11px" onclick="genSbScene('${s.id}')">🖼️</button>
-          <button style="background:var(--surface3); color:var(--text); padding:4px 10px; border:1px solid var(--border); font-size:11px" onclick="genVidScene('${s.id}')">📹</button>
+          <button style="background:var(--surface3); color:var(--text); padding:4px 10px; border:1px solid var(--border); font-size:11px" onclick="genSbScene('${s.id}', this)">🖼️</button>
+          <button style="background:var(--surface3); color:var(--text); padding:4px 10px; border:1px solid var(--border); font-size:11px" onclick="genVidScene('${s.id}', this)">📹</button>
         </div>
       </div>
     </div>`;
@@ -1090,24 +1134,32 @@ async function refreshProduction() {
 }
 
 async function generateAllStoryboard() {
-  try { const d = await api(`/api/projects/${currentProject}/storyboard/generate-all`, { method: 'POST' }); pollJob(d.job_id, 'prod-job', () => refreshProduction()); }
-  catch (e) { alert(e.message); }
+  const btn = document.getElementById('btn-gen-all-sb');
+  setBusy(btn, true, '⏳ 生成分镜中…');
+  try { const d = await api(`/api/projects/${currentProject}/storyboard/generate-all`, { method: 'POST' }); pollJob(d.job_id, 'prod-job', () => { refreshProduction(); setBusy(btn, false); }); }
+  catch (e) { alert(e.message); setBusy(btn, false); }
 }
-async function genSbScene(sid) {
-  try { const d = await api(`/api/projects/${currentProject}/storyboard/${sid}/generate`, { method: 'POST' }); pollJob(d.job_id, 'prod-job', () => refreshProduction()); }
-  catch (e) { alert(e.message); }
+async function genSbScene(sid, btn) {
+  setBusy(btn, true, '⏳ 生成中');
+  try { const d = await api(`/api/projects/${currentProject}/storyboard/${sid}/generate`, { method: 'POST' }); pollJob(d.job_id, 'prod-job', () => { refreshProduction(); setBusy(btn, false); }); }
+  catch (e) { alert(e.message); setBusy(btn, false); }
 }
 async function generateAllVideos() {
-  try { const d = await api(`/api/projects/${currentProject}/videos/generate-all`, { method: 'POST' }); pollJob(d.job_id, 'prod-job', () => refreshProduction()); }
-  catch (e) { alert(e.message); }
+  const btn = document.getElementById('btn-gen-all-vid');
+  setBusy(btn, true, '⏳ 生成视频中…');
+  try { const d = await api(`/api/projects/${currentProject}/videos/generate-all`, { method: 'POST' }); pollJob(d.job_id, 'prod-job', () => { refreshProduction(); setBusy(btn, false); }); }
+  catch (e) { alert(e.message); setBusy(btn, false); }
 }
-async function genVidScene(sid) {
-  try { const d = await api(`/api/projects/${currentProject}/videos/${sid}/generate`, { method: 'POST' }); pollJob(d.job_id, 'prod-job', () => refreshProduction()); }
-  catch (e) { alert(e.message); }
+async function genVidScene(sid, btn) {
+  setBusy(btn, true, '⏳ 生成中');
+  try { const d = await api(`/api/projects/${currentProject}/videos/${sid}/generate`, { method: 'POST' }); pollJob(d.job_id, 'prod-job', () => { refreshProduction(); setBusy(btn, false); }); }
+  catch (e) { alert(e.message); setBusy(btn, false); }
 }
 async function renderFinal() {
-  try { const d = await api(`/api/projects/${currentProject}/render`, { method: 'POST' }); pollJob(d.job_id, 'prod-job', () => refreshProduction()); }
-  catch (e) { alert(e.message); }
+  const btn = document.getElementById('btn-render-final');
+  setBusy(btn, true, '⏳ 渲染中…');
+  try { const d = await api(`/api/projects/${currentProject}/render`, { method: 'POST' }); pollJob(d.job_id, 'prod-job', () => { refreshProduction(); setBusy(btn, false); }); }
+  catch (e) { alert(e.message); setBusy(btn, false); }
 }
 
 function checkFinal() {
@@ -1151,5 +1203,37 @@ function pollJob(jobId, panelId, onComplete) {
   }, 2500);
 }
 </script>
+
+<!-- ===== Global Loading Indicator ===== -->
+<div id="global-loading">
+  <div class="gl-spinner"></div>
+  <span class="gl-text">处理中…</span>
+</div>
+<style>
+  #global-loading {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: none; align-items: center; justify-content: center; gap: 10px;
+    padding: 10px 16px; z-index: 9999;
+    background: linear-gradient(90deg, rgba(108,92,231,0.95), rgba(162,155,254,0.95));
+    color: #fff; font-size: 14px; font-weight: 600;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+    backdrop-filter: blur(4px);
+  }
+  #global-loading.show { display: flex; animation: gl-slide .25s ease; }
+  #global-loading .gl-spinner {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff;
+    animation: gl-spin .8s linear infinite;
+  }
+  @keyframes gl-spin { to { transform: rotate(360deg); } }
+  @keyframes gl-slide { from { transform: translateY(-100%); } to { transform: translateY(0); } }
+  /* Button busy state */
+  button.busy { position: relative; }
+  button.busy::after {
+    content: ''; display: inline-block; width: 12px; height: 12px; margin-left: 8px;
+    border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%;
+    animation: gl-spin .8s linear infinite; vertical-align: -1px;
+  }
+</style>
 </body>
 </html>
