@@ -4,6 +4,12 @@
 
 **剧本 → 角色卡 → 分镜关键帧 → 图生视频 → TTS配音 → 成片拼接**，全流程免费。
 
+### 🌐 在线体验
+
+无需安装，直接打开：**👉 [https://agnes-comic-drama.vercel.app](https://agnes-comic-drama.vercel.app)**
+
+> 已内置 API KEY，打开即可一键生成你的 AI 漫剧。
+
 ---
 
 ## 🎬 效果演示
