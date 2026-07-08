@@ -345,7 +345,14 @@ class AgnesClient:
         print(f"⏳ 轮询视频结果（video_id={video_id}）...")
 
         result = self.poll_video(video_id)
-        video_url = result.get("remixed_from_video_id") or result.get("video_url", "")
+        # Agnes Video V2.0 returns the final video URL in the "url" field
+        # (only present when status == "completed"). Fall back to other names.
+        video_url = (
+            result.get("url")
+            or result.get("video_url")
+            or result.get("remixed_from_video_id")
+            or ""
+        )
         if not video_url:
             raise RuntimeError(f"视频完成但未返回 URL：{result}")
 
