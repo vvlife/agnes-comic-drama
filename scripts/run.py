@@ -649,7 +649,7 @@ def edit_final(project_dir: pathlib.Path, script: dict, vid_manifest: dict,
 
     # 生成 SRT（字幕烧录统一在 main 末尾对所有最终成片执行，避免重复烧录）
     srt_path = project_dir / "subtitle.srt"
-    generate_srt(script, srt_path, scene_duration=scene_duration)
+    generate_srt(script, srt_path, scene_duration=scene_duration, vid_manifest=vid_manifest)
 
     if not final.exists():
         return None
@@ -779,21 +779,35 @@ def burn_subtitles(project_dir: pathlib.Path, srt_path: pathlib.Path,
     return video_path
 
 
-def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5):
-    """从剧本生成 SRT 字幕。"""
+def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5,
+                 vid_manifest: dict | None = None, transition: float = 0.5):
+    """从剧本生成 SRT 字幕。
+
+    时间轴与 TTS 配音严格一致：基于成片真实时间轴（xfade 拼接），
+    避免字幕与声音错位。
+    """
     lines = []
     idx = 1
-    current_time = 0.0
+
+    # 统一时间轴：优先用真实视频拼接时间线
+    if vid_manifest:
+        tl = _composition_timeline(script, vid_manifest, scene_duration, transition)
+    else:
+        tl = {}
+        t = 0.0
+        for scene in script["scenes"]:
+            tl[scene["id"]] = {"start": t, "duration": float(scene_duration)}
+            t += scene_duration
 
     for scene in script["scenes"]:
-        sd = scene_duration
+        sid = scene["id"]
         dialogues = scene.get("dialogue", [])
         if not dialogues:
-            current_time += sd
             continue
 
-        # 对白均匀分布在镜头时间中
-        per_dialogue = sd / max(len(dialogues), 1)
+        seg = tl.get(sid, {"start": 0.0, "duration": float(scene_duration)})
+        per_dialogue = seg["duration"] / max(len(dialogues), 1)
+        cur = seg["start"]
 
         for d in dialogues:
             char_name = d.get("character", "")
@@ -804,11 +818,8 @@ def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5):
                     char_name = c["name"]
                     break
 
-            start = current_time
-            end = current_time + per_dialogue
-
-            start_srt = format_srt_time(start)
-            end_srt = format_srt_time(end)
+            start_srt = format_srt_time(cur)
+            end_srt = format_srt_time(cur + per_dialogue)
 
             lines.append(f"{idx}")
             lines.append(f"{start_srt} --> {end_srt}")
@@ -816,12 +827,7 @@ def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5):
             lines.append("")
 
             idx += 1
-            current_time = end
-
-        # 如果还有剩余时间
-        remaining = sd - (current_time - (start - per_dialogue * (len(dialogues) - 1)))
-        if remaining > 0:
-            current_time += remaining
+            cur += per_dialogue
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -947,6 +953,36 @@ def _compute_scene_offsets(script: dict, vid_manifest: dict,
     return offsets
 
 
+def _composition_timeline(script: dict, vid_manifest: dict,
+                          scene_duration: int = 5, transition: float = 0.5) -> dict:
+    """计算每个场景在最终成片（xfade 转场拼接）中的真实起始秒数与可见时长。
+
+    与 edit_final 的 xfade 拼接严格对齐：
+      成片总时长 = Σ vid_dur - transition*(n-1)
+    字幕(SRT)与配音(TTS)共用此时间轴，避免声音/文字错位。
+    返回 {sid: {"start": float, "duration": float}}
+    """
+    tl: dict[str, dict[str, float]] = {}
+    cursor = 0.0
+    first = True
+    for scene in script["scenes"]:
+        sid = scene["id"]
+        if sid not in vid_manifest:
+            continue
+        vp = pathlib.Path(vid_manifest[sid]) if vid_manifest[sid] else None
+        dur = get_video_duration(vp) if (vp and vp.exists()) else float(scene_duration)
+        if first:
+            start = 0.0
+            vis = dur
+            first = False
+        else:
+            vis = dur - transition
+            start = cursor
+        tl[sid] = {"start": start, "duration": max(vis, 0.2)}
+        cursor = start + vis
+    return tl
+
+
 def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
                  scene_duration: int = 5,
                  vid_manifest: dict | None = None) -> dict:
@@ -994,15 +1030,19 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
                 cp.mark_done("tts")
                 return {}
 
-    # 计算实际场景偏移（基于已生成的视频）
+    # 计算实际场景偏移（基于成片真实时间轴，与字幕一致）
     if vid_manifest:
-        scene_offsets = _compute_scene_offsets(script, vid_manifest, scene_duration)
+        _tl = _composition_timeline(script, vid_manifest, scene_duration)
+        scene_offsets = {sid: info["start"] for sid, info in _tl.items()}
+        scene_durations = {sid: info["duration"] for sid, info in _tl.items()}
         print(f"  场景偏移：{scene_offsets}")
     else:
         scene_offsets = {}
+        scene_durations = {}
         t = 0.0
         for scene in script["scenes"]:
             scene_offsets[scene["id"]] = t
+            scene_durations[scene["id"]] = float(scene_duration)
             t += scene_duration
 
     valid_sids = set(scene_offsets.keys())
@@ -1034,12 +1074,8 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
 
         scene_start = scene_offsets[sid]
         # 获取该场景实际视频时长
-        if vid_manifest and sid in vid_manifest:
-            vid_path = pathlib.Path(vid_manifest[sid]) if vid_manifest[sid] else None
-            if vid_path and vid_path.exists():
-                actual_duration = get_video_duration(vid_path)
-            else:
-                actual_duration = float(scene_duration)
+        if sid in scene_durations:
+            actual_duration = scene_durations[sid]
         else:
             actual_duration = float(scene_duration)
 
@@ -1146,43 +1182,23 @@ def _make_lipsync_video(vid_path: pathlib.Path, tts_path: pathlib.Path,
                         out_path: pathlib.Path,
                         scene_offset: float, tts_start_in_scene: float,
                         tts_dur: float) -> bool:
-    """为一个场景生成口型同步视频。
-    
-    策略：在 TTS 说话区间用 ffmpeg overlay 混入 TTS 音频，
-    同时用音频驱动的亮度脉冲模拟口型微动。
+    """为场景生成口型同步版视频。
+
+    为避免与最终 mix 阶段重复叠加 TTS 导致“双重配音”，这里只输出
+    与原视频视觉一致、去除音轨的版本；真正的配音对齐统一由 mix_audio
+    基于成片时间轴完成（与字幕 SRT 同源，保证声画同步）。
     """
     try:
-        # 简单有效方案：直接把 TTS 混入视频，在说话区间做轻微亮度脉冲
-        # 用 ebur128 检测音量 → 不行太复杂，直接用 simpler 方案
-        
-        # 方案A：混入 TTS 音频 + 说话区间加轻微抖动
-        # 更简单：只混入 TTS + 字幕级微动效果
-        
-        # 先混入 TTS 音频到该场景视频（保留完整视频时长）
-        # 用 pad 在 TTS 前后填充静音，使其与视频等长
-        vid_dur = get_video_duration(vid_path)
-        
         cmd = [
             "ffmpeg", "-y",
             "-i", str(vid_path),
-            "-i", str(tts_path),
-            "-filter_complex",
-            # 视频：保持原时长
-            f"[0:v]setpts=PTS-STARTPTS[v];"
-            # TTS 音频：延迟到说话位置 + 前后填充静音到视频等长
-            f"[1:a]aresample=48000,"
-            f"adelay={int(tts_start_in_scene*1000)}|{int(tts_start_in_scene*1000)},"
-            f"apad=whole_dur={vid_dur}[a]",
-            "-map", "[v]", "-map", "[a]",
-            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "20",
-            "-c:a", "aac", "-b:a", "96k",
+            "-an", "-c:v", "copy",
             str(out_path),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             print(f"    ffmpeg stderr: {result.stderr[:200]}")
             return False
-        
         return out_path.exists()
     except Exception as e:
         print(f"    口型视频出错：{e}")
@@ -1212,7 +1228,8 @@ def generate_lipsync(project_dir: pathlib.Path, script: dict,
     lipsync_dir = project_dir / "lipsync"
     lipsync_dir.mkdir(parents=True, exist_ok=True)
 
-    scene_offsets = _compute_scene_offsets(script, vid_manifest, scene_duration)
+    scene_offsets = {sid: info["start"]
+                     for sid, info in _composition_timeline(script, vid_manifest, scene_duration).items()}
     vid_dir = project_dir / "videos"
 
     manifest = {}
@@ -1361,10 +1378,11 @@ def mix_audio(project_dir: pathlib.Path, script: dict,
     print(f"\n🎚️ 步骤 8：音频混音...")
     cp.mark_running("mix")
 
-    # 优先使用口型同步版视频
-    video_path = project_dir / "final_lipsync.mp4"
+    # 优先使用 xfade 拼接的纯净视频（无内置音轨），配音由下方统一叠加，
+    # 避免与 lipsync 视频内已混音的 TTS 重复导致“双重配音”。
+    video_path = project_dir / "final.mp4"
     if not video_path.exists():
-        video_path = project_dir / "final.mp4"
+        video_path = project_dir / "final_lipsync.mp4"
     if not video_path.exists():
         print("  ❌ 视频文件不存在")
         return None
@@ -1518,7 +1536,7 @@ def main():
         style=args.style,
     )
 
-    # Step 5: 成片拼接
+    # Step 5: 成片拼接（传入 vid_manifest 以便字幕 SRT 使用统一时间轴）
     final = edit_final(project_dir, script, vid_manifest, cp,
                        scene_duration=args.scene_duration)
 
