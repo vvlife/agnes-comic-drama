@@ -16,7 +16,7 @@
 
 下面是本工具生成的成片示例，可直接在仓库首页播放：
 
-<video src="api/videos/FreeToken_preview.mp4" controls width="100%" preload="metadata"></video>
+<video src="/videos/FreeToken_preview.mp4" controls width="100%" preload="metadata"></video>
 
 > 想生成你自己的漫剧？按下方「快速开始」配置 API KEY 即可一键出片。
 

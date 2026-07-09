@@ -635,27 +635,9 @@ def edit_final(project_dir: pathlib.Path, script: dict, vid_manifest: dict,
             print(f"  ⚠️ xfade 拼接出错：{e}，回退简单拼接...")
             _simple_concat(video_files, project_dir, final)
 
-    # 烧字幕
+    # 生成 SRT（字幕烧录统一在 main 末尾对所有最终成片执行，避免重复烧录）
     srt_path = project_dir / "subtitle.srt"
     generate_srt(script, srt_path, scene_duration=scene_duration)
-
-    if srt_path.exists() and srt_path.stat().st_size > 0 and final.exists():
-        final_sub = project_dir / "final_with_sub.mp4"
-        sub_cmd = ["ffmpeg", "-y", "-i", str(final),
-                   "-vf", f"subtitles={srt_path}:force_style='FontName=WenQuanYi Micro Hei,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1'",
-                   "-c:v", "libx264", "-preset", "medium", "-crf", "23",
-                   "-c:a", "copy", str(final_sub)]
-        try:
-            result = subprocess.run(sub_cmd, capture_output=True, text=True, timeout=300)
-            if result.returncode == 0 and final_sub.exists():
-                # 替换 final
-                final.unlink()
-                final_sub.rename(final)
-                print(f"  ✅ 字幕已烧录")
-            else:
-                final_sub.unlink(missing_ok=True)
-        except Exception:
-            final_sub.unlink(missing_ok=True)
 
     if not final.exists():
         return None
@@ -704,6 +686,85 @@ def get_audio_duration(path: pathlib.Path) -> float:
         return float(data["format"]["duration"])
     except Exception:
         return 2.0  # fallback
+
+
+def _ffmpeg_has_filter(name: str) -> bool:
+    """检测当前 ffmpeg 是否支持指定滤镜（如 subtitles 需要 libass）。"""
+    try:
+        r = subprocess.run(["ffmpeg", "-hide_banner", "-filters"],
+                           capture_output=True, text=True, timeout=10)
+        return re.search(rf"\b{re.escape(name)}\b", r.stdout) is not None
+    except Exception:
+        return False
+
+
+def _detect_cjk_font() -> str | None:
+    """检测系统中可用于字幕烧录的中文字体。
+
+    优先返回 TTF/OTF（libass 的 FontFile 对 .ttc 支持不稳定）；
+    找不到时返回 None，由调用方决定是否回退到 fontconfig 字体名。
+    """
+    if sys.platform == "darwin":
+        candidates = [
+            "/Library/Fonts/Arial Unicode.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            "/System/Library/Fonts/STHeiti Medium.ttc",
+            "/System/Library/Fonts/PingFang.ttc",
+        ]
+    else:  # Linux / 其他
+        candidates = [
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return None
+
+
+def burn_subtitles(project_dir: pathlib.Path, srt_path: pathlib.Path,
+                   video_path: pathlib.Path) -> pathlib.Path:
+    """将 SRT 字幕烧录到视频。返回烧录后的视频路径（失败则原样返回）。"""
+    if not srt_path.exists() or srt_path.stat().st_size == 0:
+        return video_path
+    if not _ffmpeg_has_filter("subtitles"):
+        print("  ⚠️ 当前 ffmpeg 不含 libass（subtitles 滤镜），无法烧录字幕。")
+        print("     请安装完整版：brew install ffmpeg-full")
+        return video_path
+
+    font_path = _detect_cjk_font()
+    if font_path:
+        font_arg = f"FontFile={font_path}"
+    else:
+        font_arg = "FontName=WenQuanYi Micro Hei"
+        print("  ⚠️ 未检测到中文字体，回退到 WenQuanYi（可能无效果）")
+
+    # 转义路径中的冒号（subtitles 滤镜把 ':' 当作选项分隔符）
+    srt_escaped = str(srt_path).replace(":", "\\:")
+    out = video_path.with_name(video_path.stem + "_sub.mp4")
+    vf = (f"subtitles={srt_escaped}"
+          f":force_style='{font_arg},FontSize=22,"
+          f"PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,"
+          f"Outline=2,Shadow=1'")
+    cmd = ["ffmpeg", "-y", "-i", str(video_path),
+           "-vf", vf,
+           "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+           "-c:a", "copy", str(out)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if r.returncode == 0 and out.exists():
+            video_path.unlink()
+            out.rename(video_path)
+            print(f"  ✅ 字幕已烧录：{video_path.name}")
+            return video_path
+        print(f"  ⚠️ 字幕烧录失败：{r.stderr[-300:]}")
+        out.unlink(missing_ok=True)
+    except Exception as e:
+        print(f"  ⚠️ 字幕烧录出错：{e}")
+        out.unlink(missing_ok=True)
+    return video_path
 
 
 def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5):
@@ -1514,6 +1575,18 @@ def main():
             project_dir, script, tts_manifest, sfx_manifest, cp,
             scene_duration=args.scene_duration,
         )
+
+    # 字幕烧录：确保最终交付的成片都带中文字幕
+    # （含配音版、口型版、静音版，避免口型同步后 final 被重定向而漏烧）
+    srt_path = project_dir / "subtitle.srt"
+    candidates = {
+        project_dir / "final.mp4",
+        project_dir / "final_lipsync.mp4",
+        final_with_audio,
+    }
+    for vp in candidates:
+        if vp and pathlib.Path(vp).exists():
+            burn_subtitles(project_dir, srt_path, pathlib.Path(vp))
 
     if final_with_audio:
         print(f"\n🎉 漫剧生成完成！")

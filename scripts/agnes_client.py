@@ -114,17 +114,20 @@ class AgnesClient:
         # 图生图：image 必须放在 extra_body 中
         extra_body: dict = {}
         if reference_images:
-            # 支持本地文件路径 → data URI 自动转换
-            urls = [self._to_data_uri_or_url(img) for img in reference_images]
+            # 支持本地文件路径 → data URI 自动转换，并自动压缩到上限内（保留角色一致性）
+            urls = [self._fit_reference_image(self._to_data_uri_or_url(img))
+                    for img in reference_images]
             # 限制总大小：单张 ≤ 800KB，总计 ≤ 1.5MB（避免 413/400）
             MAX_SINGLE = 800 * 1024
             MAX_TOTAL = 1500 * 1024
             filtered = []
             total = 0
             for u in urls:
-                size = len(u) - len("data:image/png;base64,") if u.startswith("data:") else 0
+                # 计算 data URI 中 payload 的实际字节数（兼容 png/jpeg 前缀）
+                prefix_len = u.find(",") + 1 if u.startswith("data:") else 0
+                size = len(u) - prefix_len
                 if size > MAX_SINGLE:
-                    print(f"  ⚠️ 跳过大尺寸参考图（{size // 1024}KB > {MAX_SINGLE // 1024}KB）")
+                    print(f"  ⚠️ 参考图压缩后仍超上限（{size // 1024}KB），跳过")
                     continue
                 if total + size > MAX_TOTAL and filtered:
                     print(f"  ⚠️ 已达参考图总大小上限，跳过剩余参考图")
@@ -133,6 +136,8 @@ class AgnesClient:
                 total += size
             if filtered:
                 extra_body["image"] = filtered
+            else:
+                print("  ⚠️ 所有参考图均超限被跳过，退化文生图")
 
         # response_format 必须放在 extra_body 中
         if response_format == "b64_json":
@@ -406,6 +411,52 @@ class AgnesClient:
             ext = "jpeg"
         b64 = base64.b64encode(p.read_bytes()).decode()
         return f"data:image/{ext};base64,{b64}"
+
+    @staticmethod
+    def _fit_reference_image(data_uri: str, max_bytes: int = 750 * 1024) -> str:
+        """将过大的参考图压缩为 JPEG data URI，使其 payload ≤ max_bytes。
+
+        这样既能满足 API 的大小限制，又不会丢弃参考图（保留角色一致性）。
+        压缩失败或本来就够小则原样返回。
+        """
+        if not data_uri.startswith("data:image"):
+            return data_uri
+        try:
+            from io import BytesIO
+            import base64 as _b64
+            from PIL import Image
+
+            _, b64 = data_uri.split(",", 1)
+            raw = _b64.b64decode(b64)
+            if len(raw) <= max_bytes:
+                return data_uri
+
+            img = Image.open(BytesIO(raw))
+            if img.mode in ("RGBA", "P", "LA"):
+                img = img.convert("RGB")
+
+            scale = 1.0
+            quality = 82
+            while scale >= 0.2:
+                w = max(1, int(img.width * scale))
+                h = max(1, int(img.height * scale))
+                buf = BytesIO()
+                img.resize((w, h)).save(buf, format="JPEG", quality=quality)
+                if buf.tell() <= max_bytes:
+                    return f"data:image/jpeg;base64,{_b64.b64encode(buf.getvalue()).decode()}"
+                # 先降质量，再降分辨率
+                if quality > 60:
+                    quality -= 12
+                else:
+                    scale -= 0.15
+            # 兜底：最低缩放 + 最低质量
+            buf = BytesIO()
+            img.resize((max(1, int(img.width * 0.2)), max(1, int(img.height * 0.2)))) \
+                .save(buf, format="JPEG", quality=55)
+            return f"data:image/jpeg;base64,{_b64.b64encode(buf.getvalue()).decode()}"
+        except Exception:
+            # 压缩失败则退回原图，交由上层大小校验决定是否跳过
+            return data_uri
 
 
 # ===================== CLI 入口 =====================
