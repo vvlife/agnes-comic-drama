@@ -28,9 +28,9 @@
 ![暴雨夜客栈](docs/gifs/ex_rainy-inn.gif)
 [▶ 观看完整视频](https://agnes-comic-drama.vercel.app/api/static-video/ex_rainy-inn.mp4)
 
-### 4. AI 觉醒保护人类
-![AI 觉醒保护人类](docs/gifs/FreeToken_preview.gif)
-[▶ 观看完整视频](https://agnes-comic-drama.vercel.app/api/static-video/FreeToken_preview.mp4)
+### 4. 社畜周报封印魔尊
+![社畜周报封印魔尊](docs/gifs/ex_excel-shen.gif)
+[▶ 观看完整视频](https://agnes-comic-drama.vercel.app/api/static-video/ex_excel-shen.mp4)
 
 ### 5. 少女穿越画中世界
 ![少女穿越画中世界](docs/gifs/ex_painting-world.gif)

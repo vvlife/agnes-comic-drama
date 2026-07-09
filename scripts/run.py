@@ -239,43 +239,55 @@ def generate_script(client: AgnesClient, theme: str, style: str, genre: str,
 5. 最后一个镜头要有情感冲击力
 6. 只输出 JSON，不要其他文字"""
 
-    rate_limiter.wait()
-    result = client.chat(
-        messages=[{"role": "user", "content": prompt}],
-        model="agnes-2.0-flash",
-        temperature=0.85,
-        max_tokens=8192,
-    )
+    last_err = None
+    script = None
+    for attempt in range(3):
+        rate_limiter.wait()
+        try:
+            result = client.chat(
+                messages=[{"role": "user", "content": prompt}],
+                model="agnes-2.0-flash",
+                temperature=0.85,
+                max_tokens=16000,
+            )
+        except Exception as e:
+            last_err = e
+            print(f"  ⚠️ 剧本生成请求失败（{attempt+1}/3）：{e}，重试...")
+            continue
 
-    # 提取 JSON — 更健壮的解析逻辑
-    json_str = result.strip()
-    # 1) 去除 markdown 代码块包装
-    if "```json" in json_str:
-        json_str = json_str.split("```json", 1)[1]
-        # 取第一个 ``` 之前的内容
-        if "```" in json_str:
-            json_str = json_str.split("```", 1)[0]
-    elif "```" in json_str:
-        parts = json_str.split("```")
-        if len(parts) >= 3:
-            json_str = parts[1]
-    # 2) 定位第一个 { 和最后一个 }，截取纯 JSON
-    first_brace = json_str.find("{")
-    last_brace = json_str.rfind("}")
-    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-        json_str = json_str[first_brace:last_brace + 1]
-    # 3) 去除可能存在的尾部逗号（trailing comma）
-    json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
-    # 4) 解析，失败时保存原始响应用于调试
-    try:
-        script = json.loads(json_str.strip())
-    except json.JSONDecodeError as e:
-        # 保存原始响应和清理后的字符串用于调试
-        debug_path = out_path.parent / "_script_debug.txt"
-        debug_path.write_text(f"=== JSON PARSE ERROR ===\n{e}\n\n=== RAW RESPONSE ===\n{result}\n\n=== CLEANED JSON ===\n{json_str}\n")
-        print(f"  ❌ JSON 解析失败: {e}")
-        print(f"  📝 原始响应已保存到: {debug_path}")
-        raise
+        # 提取 JSON — 更健壮的解析逻辑
+        json_str = result.strip()
+        # 1) 去除 markdown 代码块包装
+        if "```json" in json_str:
+            json_str = json_str.split("```json", 1)[1]
+            # 取第一个 ``` 之前的内容
+            if "```" in json_str:
+                json_str = json_str.split("```", 1)[0]
+        elif "```" in json_str:
+            parts = json_str.split("```")
+            if len(parts) >= 3:
+                json_str = parts[1]
+        # 2) 定位第一个 { 和最后一个 }，截取纯 JSON
+        first_brace = json_str.find("{")
+        last_brace = json_str.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            json_str = json_str[first_brace:last_brace + 1]
+        # 3) 去除可能存在的尾部逗号（trailing comma）
+        json_str = re.sub(r',\s*([}\]])', r'\1', json_str)
+        # 4) 解析，失败时保存原始响应用于调试
+        try:
+            script = json.loads(json_str.strip())
+            break
+        except json.JSONDecodeError as e:
+            last_err = e
+            debug_path = out_path.parent / "_script_debug.txt"
+            debug_path.write_text(f"=== JSON PARSE ERROR ===\n{e}\n\n=== RAW RESPONSE ===\n{result}\n\n=== CLEANED JSON ===\n{json_str}\n")
+            print(f"  ⚠️ JSON 解析失败（{attempt+1}/3）：{e}，重试生成...")
+            # 强化提示后重试
+            prompt = prompt + "\n\n⚠️ 上一次输出不是合法 JSON，请严格只输出一个完整 JSON 对象，不要任何多余文字、不要省略任何逗号、不要截断。"
+            continue
+    if script is None:
+        raise RuntimeError(f"剧本生成 3 次均失败: {last_err}")
 
     # 确保每个场景都有 mood 字段
     for scene in script.get("scenes", []):
