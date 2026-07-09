@@ -14,25 +14,31 @@
 
 ## 🎬 效果演示
 
-下面是 6 个示例主题生成的成片，点击播放器即可在页面内直接播放（视频托管于 Vercel，支持拖拽进度）：
+下面是 6 个示例主题生成的成片预览（GIF 动图，在 GitHub 内可直接看到循环播放；点链接可看完整视频）：
 
 ### 1. 少年剑仙三年归来
-<video src="https://agnes-comic-drama.vercel.app/api/static-video/ex_sword-return.mp4" controls width="100%" preload="metadata"></video>
+![少年剑仙三年归来](docs/gifs/ex_sword-return.gif)
+[▶ 观看完整视频](https://agnes-comic-drama.vercel.app/api/static-video/ex_sword-return.mp4)
 
 ### 2. 深宫妃子博弈
-<video src="https://agnes-comic-drama.vercel.app/api/static-video/ex_palace.mp4" controls width="100%" preload="metadata"></video>
+![深宫妃子博弈](docs/gifs/ex_palace.gif)
+[▶ 观看完整视频](https://agnes-comic-drama.vercel.app/api/static-video/ex_palace.mp4)
 
 ### 3. 暴雨夜客栈
-<video src="https://agnes-comic-drama.vercel.app/api/static-video/ex_rainy-inn.mp4" controls width="100%" preload="metadata"></video>
+![暴雨夜客栈](docs/gifs/ex_rainy-inn.gif)
+[▶ 观看完整视频](https://agnes-comic-drama.vercel.app/api/static-video/ex_rainy-inn.mp4)
 
 ### 4. AI 觉醒保护人类
-<video src="https://agnes-comic-drama.vercel.app/api/static-video/FreeToken_preview.mp4" controls width="100%" preload="metadata"></video>
+![AI 觉醒保护人类](docs/gifs/FreeToken_preview.gif)
+[▶ 观看完整视频](https://agnes-comic-drama.vercel.app/api/static-video/FreeToken_preview.mp4)
 
 ### 5. 少女穿越画中世界
-<video src="https://agnes-comic-drama.vercel.app/api/static-video/ex_painting-world.mp4" controls width="100%" preload="metadata"></video>
+![少女穿越画中世界](docs/gifs/ex_painting-world.gif)
+[▶ 观看完整视频](https://agnes-comic-drama.vercel.app/api/static-video/ex_painting-world.mp4)
 
 ### 6. 最后武林大会
-<video src="https://agnes-comic-drama.vercel.app/api/static-video/ex_martial-meet.mp4" controls width="100%" preload="metadata"></video>
+![最后武林大会](docs/gifs/ex_martial-meet.gif)
+[▶ 观看完整视频](https://agnes-comic-drama.vercel.app/api/static-video/ex_martial-meet.mp4)
 
 > 想生成你自己的漫剧？按下方「快速开始」配置 API KEY 即可一键出片。
 
