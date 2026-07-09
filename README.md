@@ -14,9 +14,25 @@
 
 ## 🎬 效果演示
 
-下面是本工具生成的成片示例，可直接在仓库首页播放：
+下面是 6 个示例主题生成的成片，点击播放器即可在页面内直接播放（视频托管于 Vercel，支持拖拽进度）：
 
-<video src="/api/static-video/FreeToken_preview.mp4" controls width="100%" preload="metadata"></video>
+### 1. 少年剑仙三年归来
+<video src="https://agnes-comic-drama.vercel.app/api/static-video/ex_sword-return.mp4" controls width="100%" preload="metadata"></video>
+
+### 2. 深宫妃子博弈
+<video src="https://agnes-comic-drama.vercel.app/api/static-video/ex_palace.mp4" controls width="100%" preload="metadata"></video>
+
+### 3. 暴雨夜客栈
+<video src="https://agnes-comic-drama.vercel.app/api/static-video/ex_rainy-inn.mp4" controls width="100%" preload="metadata"></video>
+
+### 4. AI 觉醒保护人类
+<video src="https://agnes-comic-drama.vercel.app/api/static-video/FreeToken_preview.mp4" controls width="100%" preload="metadata"></video>
+
+### 5. 少女穿越画中世界
+<video src="https://agnes-comic-drama.vercel.app/api/static-video/ex_painting-world.mp4" controls width="100%" preload="metadata"></video>
+
+### 6. 最后武林大会
+<video src="https://agnes-comic-drama.vercel.app/api/static-video/ex_martial-meet.mp4" controls width="100%" preload="metadata"></video>
 
 > 想生成你自己的漫剧？按下方「快速开始」配置 API KEY 即可一键出片。
 
