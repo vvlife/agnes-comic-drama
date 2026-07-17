@@ -53,18 +53,23 @@ class AgnesClient:
         model: str = "agnes-2.0-flash",
         temperature: float = 0.8,
         max_tokens: int = 8192,
-        enable_thinking: bool = False,
+        enable_thinking: bool | None = None,
         retries: int = 3,
     ) -> str:
-        """调用 agnes-2.0-flash 生成文本，返回 content 字符串。含重试逻辑。"""
+        """调用 agnes-2.0-flash 生成文本，返回 content 字符串。含重试逻辑。
+
+        enable_thinking:
+          - None（默认）：不传 chat_template_kwargs，沿用模型默认行为；
+          - True / False：显式开启 / 关闭思考模式。
+        """
         body: dict = {
             "model": model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        if enable_thinking:
-            body["chat_template_kwargs"] = {"enable_thinking": True}
+        if enable_thinking is not None:
+            body["chat_template_kwargs"] = {"enable_thinking": enable_thinking}
 
         last_err = None
         for attempt in range(retries):

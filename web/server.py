@@ -18,8 +18,9 @@ import time
 import uuid
 
 import requests
-from flask import Flask, request, jsonify, send_file, send_from_directory
+from flask import Flask, request, jsonify, send_file, send_from_directory, Response
 from flask_cors import CORS
+from werkzeug.utils import secure_filename
 
 # ============================================================
 # 路径配置
@@ -1089,11 +1090,13 @@ def api_render(project_id: str):
 
                 sfx_manifest = {}
                 if meta.get("enable_sfx"):
-                    log(f"🔊 生成音效描述...")
+                    log(f"🔊 合成场景背景音...")
                     client, rl = get_client_and_rl()
                     sfx_manifest = generator.generate_sfx(
                         client, script, p / "sfx",
                         generator.Checkpoint(p), rl,
+                        vid_manifest=vid_manifest,
+                        scene_duration=scene_duration,
                     )
 
                 if tts_manifest or sfx_manifest:
@@ -1102,6 +1105,7 @@ def api_render(project_id: str):
                         p, script, tts_manifest, sfx_manifest,
                         generator.Checkpoint(p),
                         scene_duration=scene_duration,
+                        vid_manifest=vid_manifest,
                     )
                     if final_with_audio:
                         log(f"✅ 混音成片：{final_with_audio}")
@@ -1172,6 +1176,375 @@ def api_delete_scene(project_id: str, sid: str):
     (p / "videos" / f"{sid}.mp4").unlink(missing_ok=True)
 
     return jsonify({"ok": True})
+
+
+# ============================================================
+# 路由 — 编辑器（剪辑）
+# ============================================================
+
+@app.route("/editor.html")
+def editor_page():
+    """编辑器独立页面。"""
+    # 直接读文件返回，完全接管缓存头，避免 send_file 覆盖导致界面更新后看不到变化
+    data = (PUBLIC_DIR / "editor.html").read_bytes()
+    resp = Response(data, mimetype="text/html; charset=utf-8")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
+
+@app.route("/result.html")
+def result_page():
+    """剪辑成片结果页。"""
+    data = (PUBLIC_DIR / "result.html").read_bytes()
+    resp = Response(data, mimetype="text/html; charset=utf-8")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
+
+@app.route("/sidebar.css")
+def sidebar_css():
+    """统一左侧菜单栏样式组件。"""
+    data = (PUBLIC_DIR / "sidebar.css").read_bytes()
+    resp = Response(data, mimetype="text/css; charset=utf-8")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+
+@app.route("/sidebar.js")
+def sidebar_js():
+    """统一左侧菜单栏逻辑组件。"""
+    data = (PUBLIC_DIR / "sidebar.js").read_bytes()
+    resp = Response(data, mimetype="application/javascript; charset=utf-8")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+
+@app.route("/api/projects/<project_id>/edit/scenes", methods=["GET"])
+def api_edit_scenes(project_id: str):
+    """列出可用于剪辑的场景：时长、视频/分镜 URL、对白、站位等。"""
+    p = validate_project(project_id)
+    if not p:
+        return jsonify({"error": "项目不存在"}), 404
+
+    script = load_script(p)
+    if not script:
+        return jsonify({"error": "脚本不存在"}), 404
+
+    vid_manifest = load_vid_manifest(p)
+    scenes = []
+    for s in script.get("scenes", []):
+        sid = s["id"]
+        vp = pathlib.Path(vid_manifest[sid]) if vid_manifest.get(sid) else None
+        dur = generator.get_video_duration(vp) if (vp and vp.exists()) else None
+        scenes.append({
+            "sid": sid,
+            "location": s.get("location", ""),
+            "time": s.get("time", ""),
+            "camera": s.get("camera", ""),
+            "mood": s.get("mood", ""),
+            "action": s.get("action", ""),
+            "visual": s.get("visual", ""),
+            "blocking": s.get("blocking", ""),
+            "dialogue": s.get("dialogue", []),
+            "duration": round(dur, 3) if dur else None,
+            "video_url": (
+                f"/api/project-files/{project_id}/videos/{sid}.mp4"
+                if (vp and vp.exists()) else None
+            ),
+            "thumb_url": f"/api/project-files/{project_id}/storyboard/{sid}.png",
+        })
+
+    # 已导出的剪辑成片
+    edited_with_audio = (p / "edited_final_with_audio.mp4")
+    edited_silent = (p / "edited_final.mp4")
+    edited_url = None
+    if edited_with_audio.exists():
+        edited_url = f"/api/project-files/{project_id}/edited_final_with_audio.mp4"
+    elif edited_silent.exists():
+        edited_url = f"/api/project-files/{project_id}/edited_final.mp4"
+
+    # 音频轨可用性（供前端分轨编辑器展示）
+    tts_avail = (p / "tts_mixed.m4a").exists() or (p / "edit_audio" / "tts_manifest.json").exists()
+    sfx_manifest = p / "sfx" / "sfx_manifest.json"
+    amb_avail = False
+    if sfx_manifest.exists():
+        try:
+            _sm = json.loads(sfx_manifest.read_text())
+            amb_avail = any(v.get("path") for v in _sm.values())
+        except Exception:
+            amb_avail = False
+    music_dir = p / "music"
+    music_file = None
+    music_url = None
+    if music_dir.exists():
+        for ext in ("mp3", "wav", "m4a", "ogg"):
+            cand = [f for f in music_dir.glob(f"*.{ext}") if f.is_file()]
+            if cand:
+                music_file = cand[0].name
+                music_url = f"/api/project-files/{project_id}/music/{music_file}"
+                break
+    audio_tracks = {
+        "tts": {"label": "🎙️ 配音", "available": bool(tts_avail),
+                "enabled": bool(tts_avail), "volume": 1.0},
+        "ambient": {"label": "🌊 场景音", "available": bool(amb_avail),
+                    "enabled": bool(amb_avail), "volume": 0.32},
+        "music": {"label": "🎵 音乐", "available": music_file is not None,
+                  "enabled": False, "volume": 0.5, "url": music_url, "filename": music_file},
+    }
+
+    return jsonify({
+        "scenes": scenes,
+        "edited_url": edited_url,
+        "has_audio": edited_with_audio.exists(),
+        "audio_tracks": audio_tracks,
+        "characters": [
+            {"id": c.get("id"), "name": c.get("name", c.get("id"))}
+            for c in script.get("characters", [])
+        ],
+        "total_duration": round(sum((s.get("duration") or 0) for s in scenes), 2),
+    })
+
+
+@app.route("/api/projects/<project_id>/edit/render", methods=["POST"])
+def api_edit_render(project_id: str):
+    """按 edits 重新剪辑导出成片。
+
+    body: {"edits": [{"sid","in","out","enabled"}], "with_audio": bool}
+    """
+    p = validate_project(project_id)
+    if not p:
+        return jsonify({"error": "项目不存在"}), 404
+
+    script = load_script(p)
+    if not script:
+        return jsonify({"error": "脚本不存在"}), 404
+
+    body = request.get_json(force=True, silent=True) or {}
+    edits = body.get("edits", [])
+    with_audio = body.get("with_audio", True)
+    audio_tracks = body.get("audio_tracks")
+    audio_clips = body.get("audio_clips")
+    subtitle_disabled = body.get("subtitle_disabled")
+    if not edits:
+        return jsonify({"error": "edits 为空"}), 400
+
+    job_id = f"{project_id}_edit_{uuid.uuid4().hex[:6]}"
+    jobs[job_id] = {
+        "id": job_id,
+        "project_id": project_id,
+        "task_type": "edit",
+        "status": "pending",
+        "logs": [],
+        "result": None,
+        "created_at": time.time(),
+    }
+
+    def _run():
+        jobs[job_id]["status"] = "running"
+        def log(msg):
+            print(msg, flush=True)
+            jobs[job_id]["logs"].append(msg)
+        try:
+            log("✂️ 开始剪辑导出...")
+            out = generator.edit_render(
+                p, script, edits,
+                generator.Checkpoint(p),
+                scene_duration=int((load_meta_duration(p))),
+                with_audio=bool(with_audio),
+                audio_tracks=audio_tracks,
+                audio_clips=audio_clips,
+                subtitle_disabled=subtitle_disabled,
+            )
+            if out:
+                jobs[job_id]["status"] = "done"
+                jobs[job_id]["result"] = str(out)
+                log(f"✅ 剪辑成片：{out}")
+            else:
+                jobs[job_id]["status"] = "failed"
+                log("❌ 剪辑失败")
+        except Exception as e:
+            jobs[job_id]["status"] = "failed"
+            log(f"❌ 剪辑异常：{e}")
+            import traceback
+            traceback.print_exc()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"job_id": job_id, "status": "pending"})
+
+
+def _extract_json(text):
+    """从模型输出里尽量解析出 JSON 对象（容忍 ```json 包裹）。"""
+    if not text:
+        return None
+    t = text.strip()
+    if t.startswith("```"):
+        nl = t.find("\n")
+        end = t.rfind("```")
+        if nl != -1 and end != -1:
+            t = t[nl + 1:end].strip()
+    try:
+        return json.loads(t)
+    except Exception:
+        pass
+    s = t.find("{"); e = t.rfind("}")
+    if s != -1 and e != -1 and e > s:
+        try:
+            return json.loads(t[s:e + 1])
+        except Exception:
+            return None
+    return None
+
+
+@app.route("/api/projects/<project_id>/edit/ai", methods=["POST"])
+def api_edit_ai(project_id: str):
+    """自然语言剪辑：把当前编辑器状态 + 指令交给大模型，返回结构化操作。"""
+    p = validate_project(project_id)
+    if not p:
+        return jsonify({"error": "项目不存在"}), 404
+    body = request.get_json(force=True, silent=True) or {}
+    command = (body.get("command") or "").strip()
+    state = body.get("state") or {}
+    if not command:
+        return jsonify({"error": "缺少 command"}), 400
+
+    env = get_env()
+    api_key = env.get("AGNES_API_KEY", "")
+    if not api_key:
+        return jsonify({"error": "no_key",
+                         "msg": "未配置 AGNES_API_KEY，无法使用 AI 大模型。可在生成器设置中配置，或将走本地规则解析。"}), 200
+    try:
+        client = agnes_client.AgnesClient(api_key=api_key)
+    except Exception as e:
+        return jsonify({"error": "no_key", "msg": str(e)}), 200
+
+    state_json = json.dumps(state, ensure_ascii=False)
+    system = (
+        "你是一个视频剪辑助手的指令解析器。用户用中文描述想对时间轴做的剪辑操作，"
+        "你需要把它转成一组结构化操作 JSON。\n"
+        "剪辑模型：\n"
+        "- order 是片段顺序（1-based 下标即「第N段」）。每条轨道按镜头对齐：video/tts/ambient/sub 都按 order 中的 sid 索引。\n"
+        "  注意：缩短某条视频片段不会改变字幕/音频片段的长度，它们各自独立。\n"
+        "- 每个片段状态：{in: 入点秒, out: 出点秒, enabled: 是否启用}；duration = out - in。\n"
+        "- 音乐是整轨(music)，状态在 mState：{enabled, in, out}；out=0 表示到结尾。\n"
+        "- 字幕(sub)按镜头，subAll 表示全局是否显示，subOff 是被单独隐藏的 sid 列表。\n"
+        "- 轨道开关：tracksCfg 含 tts/ambient/music 的 enabled 与 volume（0~1.5）。solo 为独奏的轨道集合。\n\n"
+        "请只输出一个 JSON 对象，不要任何解释或 markdown，格式：\n"
+        "{\"reply\":\"给用户的简短中文确认（30字内）\",\"operations\":[ ... ]}\n"
+        "operations 可用类型（index 均为 1-based；省略字段表示保持原值）：\n"
+        "1) {\"op\":\"trim\",\"track\":\"video|tts|ambient|sub|music\",\"index\":N,\"in\":数,\"out\":数}  // 设置入/出点（music 无需 index）\n"
+        "2) {\"op\":\"setDuration\",\"track\":\"video|tts|ambient|sub\",\"index\":N,\"duration\":数}  // out=in+duration\n"
+        "3) {\"op\":\"enable\",\"track\":\"video|tts|ambient\",\"index\":N,\"enabled\":true|false}\n"
+        "4) {\"op\":\"trackEnable\",\"track\":\"tts|ambient|music\",\"enabled\":true|false}\n"
+        "5) {\"op\":\"trackSolo\",\"track\":\"tts|ambient|music\"}  // 独奏该轨\n"
+        "6) {\"op\":\"trackVolume\",\"track\":\"tts|ambient|music\",\"volume\":0.0~1.5}\n"
+        "7) {\"op\":\"subtitle\",\"scope\":\"scene\",\"index\":N,\"enabled\":true|false}  // 单镜字幕显隐\n"
+        "8) {\"op\":\"subtitle\",\"scope\":\"all\",\"enabled\":true|false}  // 全部字幕显隐\n"
+        "9) {\"op\":\"swap\",\"a\":N,\"b\":M}  // 调换第N段与第M段\n"
+        "10) {\"op\":\"reorder\",\"from\":N,\"to\":M}  // 把第N段移到第M位\n"
+        "11) {\"op\":\"play\"} / {\"op\":\"stop\"} / {\"op\":\"reset\"}\n"
+        "12) {\"op\":\"setDialogue\",\"index\":N,\"dialogue\":[{\"character\":\"原角色id\",\"text\":\"新对白\"}]}  // 重写第N段台词（高阶内容调整）\n"
+        "内容调整（高阶）：当用户要『改写/调整某段内容、对白、台词、让某段更XX』时，用 setDialogue 给出该段新的全部对白行（可增删行）。"
+        "要求：character 必须沿用原对白里的角色 id（不要改名/不要造新角色），text 为改写后的台词，保持与画面/情绪一致；字幕只显示台词文本，不含角色名。\n"
+        "约束：in>=0 且 in<out；out 不超过该片段原始时长(duration 字段)；duration>=0.2；dialogue 为数组，每项 {character, text}，text 非空，行数<=6。\n"
+        "若指令无法映射为剪辑操作，operations 设为 [] 并在 reply 中礼貌说明。\n"
+    )
+    user = f"当前编辑器状态（JSON）：\n{state_json}\n\n用户指令：{command}"
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    try:
+        raw = client.chat(messages, model="agnes-2.0-flash", temperature=0.2,
+                          max_tokens=1024, enable_thinking=False)
+    except Exception as e:
+        return jsonify({"error": "llm_fail", "msg": str(e)}), 200
+
+    parsed = _extract_json(raw)
+    if parsed is None:
+        return jsonify({"error": "parse_fail", "msg": "模型返回无法解析", "raw": raw[:500]}), 200
+
+    # 高阶内容调整：把 setDialogue 操作持久化到 script.json，
+    # 这样导出时的配音(TTS)与烧录字幕(SRT)都会使用新台词。
+    script = load_script(p)
+    if script:
+        scenes_by_id = {s["id"]: s for s in script.get("scenes", [])}
+        order_list = state.get("order") or []
+        char_ids = {c.get("id") for c in script.get("characters", [])}
+        name_to_id = {c.get("name"): c.get("id") for c in script.get("characters", [])}
+        changed = False
+        for op in parsed.get("operations", []):
+            if op.get("op") != "setDialogue":
+                continue
+            idx = op.get("index")
+            if not isinstance(idx, int) or not (1 <= idx <= len(order_list)):
+                continue
+            sid = order_list[idx - 1]
+            sc = scenes_by_id.get(sid)
+            if not sc:
+                continue
+            dlg_in = op.get("dialogue")
+            if not isinstance(dlg_in, list):
+                continue
+            new_dlg = []
+            for d in dlg_in[:8]:
+                if not isinstance(d, dict):
+                    continue
+                text = str(d.get("text") or "").strip()
+                if not text:
+                    continue
+                char = str(d.get("character") or "").strip()
+                # 角色名 <-> id 互转，找不到则沿用该场景首条对白角色
+                if char and char not in char_ids and char in name_to_id:
+                    char = name_to_id[char]
+                if not char and sc.get("dialogue"):
+                    char = sc["dialogue"][0].get("character", "")
+                new_dlg.append({"character": char, "text": text})
+            if new_dlg:
+                sc["dialogue"] = new_dlg
+                changed = True
+        if changed:
+            save_script(p, script)
+
+    return jsonify({"operations": parsed.get("operations", []), "reply": parsed.get("reply", "")})
+
+
+@app.route("/api/projects/<project_id>/edit/music", methods=["POST"])
+def api_edit_music_upload(project_id: str):
+    """上传背景音乐到项目 music/ 目录，返回可回传的 path 与播放 url。"""
+    p = validate_project(project_id)
+    if not p:
+        return jsonify({"error": "项目不存在"}), 404
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "未收到文件"}), 400
+    fn = secure_filename(f.filename)
+    if not fn:
+        return jsonify({"error": "文件名非法"}), 400
+    music_dir = p / "music"
+    music_dir.mkdir(parents=True, exist_ok=True)
+    save = music_dir / fn
+    f.save(str(save))
+    return jsonify({
+        "ok": True,
+        "path": f"music/{fn}",
+        "url": f"/api/project-files/{project_id}/music/{fn}",
+        "filename": fn,
+    })
+
+
+def load_meta_duration(p: pathlib.Path) -> int:
+    """从 meta.json 读 scene_duration，缺省 5。"""
+    mp = p / "meta.json"
+    if mp.exists():
+        try:
+            return int(json.loads(mp.read_text()).get("scene_duration", 5))
+        except Exception:
+            pass
+    return 5
 
 
 # ============================================================
@@ -1586,9 +1959,11 @@ def api_auto_run(project_id: str):
 
                 sfx_manifest = {}
                 if enable_sfx:
-                    log(f"🔊 生成音效描述...")
+                    log(f"🔊 合成场景背景音...")
                     sfx_manifest = generator.generate_sfx(
                         client, script, p / "sfx", cp, rl,
+                        vid_manifest=vid_manifest,
+                        scene_duration=scene_duration,
                     )
 
                 if tts_manifest or sfx_manifest:
@@ -1596,6 +1971,7 @@ def api_auto_run(project_id: str):
                     final_with_audio = generator.mix_audio(
                         p, script, tts_manifest, sfx_manifest, cp,
                         scene_duration=scene_duration,
+                        vid_manifest=vid_manifest,
                     )
                     if final_with_audio:
                         log(f"✅ 混音成片：{final_with_audio}")

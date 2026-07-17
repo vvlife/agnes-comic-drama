@@ -117,6 +117,32 @@ SFX_TEMPLATES = {
     "战斗": "clashing weapons, combat, intense action",
 }
 
+# 场景背景音合成配方：根据 location/mood/action 关键词本地合成（ffmpeg，免费）
+# 每个配方：noise 颜色 + 滤波链（已含音量）。部分"史诗/肃杀"类额外叠加低频 drone。
+AMBIENT_RECIPES = {
+    "water":  ("pink",  "bandpass=f=1400:w=1.5,volume=0.55"),
+    "fire":   ("brown", "lowpass=f=900,highpass=f=90,volume=0.6"),
+    "wind":   ("brown", "lowpass=f=520,volume=0.55"),
+    "battle": ("brown", "lowpass=f=700,volume=0.5"),
+    "calm":   ("pink",  "lowpass=f=1300,volume=0.3"),
+    "tense":  ("brown", "lowpass=f=300,volume=0.5"),
+    "epic":   ("brown", "lowpass=f=800,volume=0.5"),
+    "magic":  ("pink",  "highpass=f=2200,volume=0.32"),
+    "neutral":("brown", "lowpass=f=850,volume=0.42"),
+}
+# 关键词 → 配方名（按优先级匹配）
+AMBIENT_KEYWORD_MAP = [
+    (("水", "河", "海", "雨", "溪", "波", "潮", "浪", "潭", "湖"), "water"),
+    (("火", "焰", "熔", "炎", "焚", "灼"), "fire"),
+    (("风", "云", "崖", "空", "天", "夜", "月", "雪", "雾"), "wind"),
+    (("战", "斗", "杀", "剑", "兵", "击", "爆", "碎", "爪", "刃"), "battle"),
+    (("庙", "宫", "殿", "禅", "山", "林", "幽", "静", "竹", "谷"), "calm"),
+    (("法", "术", "灵", "阵", "符", "光", "网", "数", "幻", "晶"), "magic"),
+]
+# 这些氛围额外叠加一层 56Hz 低频 drone（压迫感 / 史诗感）
+AMBIENT_DRONE_MOODS = {"肃杀", "紧张", "危急", "暴怒", "恐怖", "悲壮", "惨烈",
+                       "震撼", "壮阔", "磅礴", "诡谲", "神秘", "压抑", "混乱"}
+
 
 # ===================== Checkpoint =====================
 
@@ -181,7 +207,7 @@ def generate_script(client: AgnesClient, theme: str, style: str, genre: str,
     style_info = STYLE_PRESETS.get(style, STYLE_PRESETS["三渲二国风"])
     genre_info = GENRE_PRESETS.get(genre, genre)
 
-    prompt = f"""你是一位专业的漫剧剧本编剧，擅长用画面感极强的文字讲述故事。请根据以下信息生成分幕剧本，输出严格的 JSON 格式。
+    prompt = f"""你是一位专业的漫剧编剧兼分镜师，擅长写出有因果、有潜台词、画面感极强的剧本。请根据以下信息生成分幕剧本，输出严格 JSON。
 
 主题：{theme}
 风格：{style}
@@ -189,55 +215,59 @@ def generate_script(client: AgnesClient, theme: str, style: str, genre: str,
 总镜头数：{n_scenes}
 每镜头时长：{scene_duration}秒
 
-## 叙事结构要求
-- 开头（1-2镜）：建立世界观，展示环境氛围，引入主角
-- 发展（中段）：冲突升级，角色互动，悬念推进
-- 高潮（倒数2-3镜）：最激烈的冲突/对抗/转折
-- 结尾（最后1镜）：情感升华或悬念留白，给观众回味
+## 叙事结构
+- 开头（1-3镜）：建立世界观与主角困境，交代动机
+- 发展：冲突升级，角色目标清晰，靠对白与动作推进因果
+- 高潮（倒数2-3镜）：最激烈对抗 / 反转 / 抉择
+- 结尾（最后1镜）：情感落点，留余韵
 
-## 画面描述规范（非常重要！）
-- action 字段必须包含具体的视觉细节：人物动作、表情变化、环境动态（如衣袂飘动、落叶纷飞）
-- 每个 action 都要像一幅画的描述，而非抽象叙事
-- 好的例子："凌寒闭目凝神，残剑骤然爆发刺目光芒，剑气瞬间冻结漫天飞石"
-- 差的例子："凌寒使用绝招打败了对手"
+## 对白规范（重中之重，旧版对白太空洞）
+- 每句对白必须"推动剧情或揭示性格"，禁止无意义的单字感叹（如"格！""破阵！""罢了…"）
+- 对白要像真实人物会说的话：有意图、有潜台词、有情绪层次，可多镜串成一段对话
+- 每句 10-25 字；对白对象的 intent 字段写明"这句台词想达成什么"（推进关系/设套/劝降/点破真相/掩饰恐惧…）
+- 不是每个镜头都要对白，但凡有对白必须有意义、能被观众记住
 
-## 对白规范
-- 每句不超过 12 字，简短有力
-- 符合角色性格：高冷角色惜字如金，热血角色语气激昂
-- 不是每个场景都需要对白，纯画面也可以推进叙事
+## 人物站位 / 构图（blocking，必填）
+- 每个镜头用 blocking 写明：每个出场角色在画面中的位置（左/右/中、前景/后景、高低）、彼此间距、与镜头的关系
+- 例："林策立于画面左下三分线，渊魇悬右上方俯压，二人成对角线对峙；墨锋在远景中景中线，形成三角制衡"
+
+## 画面描述规范（action + visual，单镜头描述至少 120 字，比旧版翻倍）
+- action：连续具体的视觉动作（人物动作、表情变化、衣袂/发丝动态、环境变化），像描述一段影像
+- visual：补充环境质感 / 光影 / 关键道具 / 色彩氛围（80-120 字）
+- 好例："凌寒闭目凝神，残剑骤然迸发刺目金芒，剑气瞬间冻结漫天飞石，碎石悬停如星"
+- 差例："凌寒使用绝招打败了对手"
 
 ## 镜头语言
-- 丰富多样：交替使用远景/中景/近景/特写/推镜头/摇镜头/俯拍/仰拍
-- 远景用于建立环境，特写用于情感表达
-- 动作场景用快速推镜头，情感场景用缓慢摇镜头
+交替 远景/中景/近景/特写/推/摇/俯/仰；远景建环境，特写给情绪
 
-输出格式（严格 JSON）：
+输出 JSON（严格）：
 {{
-  "title": "剧名（四字或五字，有诗意）",
+  "title": "剧名（四或五字，有诗意）",
   "characters": [
-    {{"id": "C1", "name": "角色名", "visual": "详细外观（服装颜色材质/发型发色/体型/标志性特征如疤痕/配饰/武器），至少40字", "personality": "性格气质（2-3个关键词）", "age": "年龄"}}
+    {{"id": "C1", "name": "角色名", "visual": "详细外观（服装/发色/体型/标志性配饰武器）≥40字", "personality": "性格2-3词", "age": "年龄"}}
   ],
   "scenes": [
     {{
       "id": "S01",
-      "location": "场景地点（含环境细节，如'断崖之巅，云海翻涌'）",
-      "time": "时间（清晨薄雾/正午烈日/黄昏残照/深夜月光）",
+      "location": "场景地点（含环境细节）",
+      "time": "时间",
       "characters": ["C1"],
-      "action": "画面动作描述（具体视觉细节，50-80字，像描述一幅画）",
-      "dialogue": [{{"character": "C1", "text": "台词"}}],
-      "camera": "镜头运动（远景建立/中景叙事/特写表情/推镜头聚焦/摇镜头环顾/仰拍气势/俯拍全局）",
-      "mood": "氛围词（苍凉/壮阔/温馨/紧张/震撼/悲壮/空灵/肃杀）"
+      "action": "连续视觉动作描述（≥120字，画面感强）",
+      "visual": "光影/质感/道具/色彩补充（80-120字）",
+      "blocking": "人物站位与构图（谁在画面何处、彼此关系、与镜头关系）",
+      "dialogue": [{{"character": "C1", "text": "有叙事意义的台词（10-25字）", "intent": "这句台词背后的意图"}}],
+      "camera": "镜头运动",
+      "mood": "氛围词"
     }}
   ]
 }}
 
 要求：
-1. 角色 2-4 个，每个角色要有独特且可辨识的外观特征（颜色对比、标志性配饰）
-2. 对白简短有力，每句不超过 12 字
-3. 镜头之间有因果逻辑和叙事推进
-4. 第一个镜头一定是远景，建立场景环境
-5. 最后一个镜头要有情感冲击力
-6. 只输出 JSON，不要其他文字"""
+1. 角色 2-4 个，外观可辨识（颜色对比、标志性配饰）
+2. 对白必须有 intent 且推动叙事，禁止空洞感叹
+3. 每个镜头含 action + visual + blocking 三字段，描述量翻倍
+4. 首镜必为远景建环境，末镜有情感冲击
+5. 只输出 JSON，不要其他文字"""
 
     last_err = None
     script = None
@@ -299,6 +329,115 @@ def generate_script(client: AgnesClient, theme: str, style: str, genre: str,
     cp.mark_done("script")
     print(f"  ✅ 剧本已保存：{out_path}")
     return script
+
+
+def _extract_json_array(text: str) -> list | None:
+    """从模型输出中尽力解析出一个 JSON 数组（容错：去代码围栏/截断/尾逗号）。"""
+    t = (text or "").strip()
+    if "```json" in t:
+        t = t.split("```json", 1)[1]
+        if "```" in t:
+            t = t.split("```", 1)[0]
+    elif "```" in t:
+        parts = t.split("```")
+        if len(parts) >= 3:
+            t = parts[1]
+    first = t.find("[")
+    last = t.rfind("]")
+    if first != -1 and last != -1 and last > first:
+        t = t[first:last + 1]
+    t = re.sub(r',\s*([}\]])', r'\1', t)
+    try:
+        obj = json.loads(t.strip())
+        if isinstance(obj, list):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
+def _improve_chunk(client: AgnesClient, rate_limiter: RateLimiter,
+                   chunk_scenes: list, chunk_idx: int, chunk_total: int) -> list | None:
+    """升级一小批镜头（分块以降低超长 JSON 出错概率）。失败返回 None。"""
+    prompt = f"""你是一位资深漫剧编剧。下面是一批（{len(chunk_scenes)} 个）已生成剧本的镜头 JSON 数组。请在不改变每个镜头的 id / location / time / camera / mood / characters 字段的前提下，对这批镜头做"质量升级"，只输出升级后的 JSON 数组（以 [ 开头、] 结尾），不要其他任何文字：
+
+1. 对白升级：对白保持为数组，每条对象含 "character"（角色 id，如 "C1"）、"text"（改写后的台词，10-25字，能推动剧情或揭示性格、有潜台词、像真人会说的话）、"intent"（这句台词背后的意图，如"劝降/点破真相/掩饰恐惧"）。把空洞单字感叹扩写成有信息量的短句。
+2. 站位升级：为每个镜头补一个 "blocking" 字段，说明每个出场角色在画面中的位置（左/右/中、前景/后景、高低）、彼此间距、与镜头的关系（≥30字）。
+3. 描述翻倍：把每个镜头的 "action" 扩写到 ≥120 字（连续具体视觉动作：人物动作、表情、衣袂发丝动态、环境变化），并补一个 "visual" 字段（80-120字：光影/质感/道具/色彩氛围）。保留原有情节要点，只是写得更具体。
+
+原镜头数组：
+{json.dumps(chunk_scenes, ensure_ascii=False, indent=2)}
+"""
+    last_err = None
+    for attempt in range(3):
+        rate_limiter.wait()
+        try:
+            result = client.chat(
+                messages=[{"role": "user", "content": prompt}],
+                model="agnes-2.0-flash",
+                temperature=0.7,
+                max_tokens=8000,
+            )
+        except Exception as e:
+            last_err = e
+            print(f"  ⚠️ 第{chunk_idx+1}/{chunk_total}批优化请求失败（{attempt+1}/3）：{e}，重试...")
+            continue
+        arr = _extract_json_array(result)
+        if arr is not None:
+            return arr
+        last_err = "JSON 解析失败"
+        print(f"  ⚠️ 第{chunk_idx+1}/{chunk_total}批 JSON 解析失败（{attempt+1}/3），重试...")
+    print(f"  ⚠️ 第{chunk_idx+1}/{chunk_total}批 3 次均失败，沿用原镜头")
+    return None
+
+
+def improve_existing_script(client: AgnesClient, script: dict, rate_limiter: RateLimiter,
+                              out_path: pathlib.Path) -> dict:
+    """在保留剧情主线 / 角色 / 标题的前提下，升级现有剧本：
+
+    - 把空洞对白改写为有叙事意义、带潜台词、含 intent 的台词
+    - 为每个镜头补上 blocking（人物站位 / 构图）
+    - 把 action / visual 描述量翻倍（画面更具体）
+
+    用于"优化剧本"而不丢失已生成视频对应的剧情。
+    """
+    print(f"\n✨ 优化现有剧本（对白 / 站位 / 描述翻倍，分块升级）...")
+
+    orig_scenes = script.get("scenes", [])
+    merged = [dict(s) for s in orig_scenes]  # 占位，按 id 回写
+    chunk_size = 4
+    chunks = [orig_scenes[i:i + chunk_size] for i in range(0, len(orig_scenes), chunk_size)]
+    total = len(chunks)
+
+    for ci, ch in enumerate(chunks):
+        arr = _improve_chunk(client, rate_limiter, ch, ci, total)
+        if not arr:
+            continue
+        amap = {s.get("id"): s for s in arr if isinstance(s, dict) and s.get("id")}
+        for s in ch:
+            up = amap.get(s["id"])
+            if not up:
+                continue
+            new_s = dict(s)  # 继承原字段（id/location/time/camera/mood/characters）
+            for fld in ("dialogue", "blocking", "action", "visual"):
+                if up.get(fld) not in (None, "", []):
+                    new_s[fld] = up[fld]
+            new_s.setdefault("blocking", s.get("blocking", ""))
+            new_s.setdefault("visual", s.get("visual", ""))
+            new_s.setdefault("action", s.get("action", ""))
+            new_s.setdefault("dialogue", s.get("dialogue", []))
+            idx = next((k for k, o in enumerate(orig_scenes) if o["id"] == s["id"]), None)
+            if idx is not None:
+                merged[idx] = new_s
+
+    improved = {**script, "scenes": merged}
+    improved.setdefault("title", script.get("title", ""))
+    improved.setdefault("characters", script.get("characters", []))
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(improved, ensure_ascii=False, indent=2))
+    print(f"  ✅ 剧本已优化：{out_path}（{len(merged)} 镜）")
+    return improved
 
 
 # ===================== 步骤 2：角色三联卡 =====================
@@ -412,14 +551,18 @@ def generate_storyboard(client: AgnesClient, script: dict, style: str,
             manifest[sid] = {"path": str(out_path), "prompt": ""}
             continue
 
-        # 构建提示词——层次化：风格→环境→主体→镜头→氛围→品质
+        # 构建提示词——层次化：风格→环境→主体→站位→镜头→氛围→品质
         quality_tags = style_info.get("quality", "masterpiece, best quality")
         negative_tags = style_info.get("negative", "")
         avoid_hint = f" avoid: {negative_tags}" if negative_tags else ""
+        blocking = scene.get("blocking", "")
+        visual = scene.get("visual", "")
         prompt = (
             f"{style_info['prefix']}，"
             f"场景：{scene['location']}，{scene['time']}，"
             f"画面主体：{scene['action']}，"
+            f"视觉细节：{visual}，"
+            f"人物站位与构图：{blocking}，"
             f"镜头语言：{scene['camera']}，"
             f"景深层次，前中后景分明，"
             f"{scene['mood']}氛围，{style_info['lighting']}，{style_info['palette']}，"
@@ -519,13 +662,16 @@ def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
             print(f"  ⚠️ {sid} 关键帧不存在，跳过视频生成")
             continue
 
-        # 构建视频提示词——强调动态、运镜、氛围
+        # 构建视频提示词——强调动态、运镜、站位、氛围
         action = scene.get('action', '')
+        visual = scene.get('visual', '')
+        blocking = scene.get('blocking', '')
         camera = scene.get('camera', '')
         mood = scene.get('mood', '')
         location = scene.get('location', '')
         video_prompt = (
-            f"{action}，{camera}，"
+            f"{action}，{visual}，"
+            f"人物站位与构图：{blocking}，{camera}，"
             f"smooth fluid motion，natural character movement，"
             f"hair and clothing dynamics，environmental particle effects，"
             f"{mood}氛围，{location}，"
@@ -779,8 +925,45 @@ def burn_subtitles(project_dir: pathlib.Path, srt_path: pathlib.Path,
     return video_path
 
 
+def _align_subtitle_windows(sid, dialogues, tts_manifest, scene_start, scene_dur):
+    """计算每段对白字幕的 [start, end]，优先对齐真实 TTS 音频时长。
+
+    有 TTS 清单时，用每句配音真实的 start / tts_duration，使字幕与声音同步；
+    否则回退到按场景时长平均切分。同时避免同场景内相邻字幕重叠、且不超出场景结尾。
+    """
+    n = len(dialogues)
+    if not n:
+        return []
+    per = scene_dur / n
+    wins = []
+    for i in range(n):
+        key = f"{sid}_{i}"
+        info = (tts_manifest or {}).get(key)
+        if info and info.get("tts_duration"):
+            st = float(info.get("start", scene_start + i * per))
+            en = st + float(info["tts_duration"])
+        else:
+            st = scene_start + i * per
+            en = st + per
+        wins.append([st, en])
+    # 防止相邻字幕重叠：后一条起点不早于前一条终点
+    for i in range(1, n):
+        if wins[i][0] < wins[i - 1][1]:
+            wins[i][0] = wins[i - 1][1]
+            if wins[i][1] < wins[i][0]:
+                wins[i][1] = wins[i][0]
+    scene_end = scene_start + scene_dur
+    for i in range(n):
+        if wins[i][1] > scene_end:
+            wins[i][1] = scene_end
+        if wins[i][0] > wins[i][1]:
+            wins[i][0] = wins[i][1]
+    return [(w[0], w[1]) for w in wins]
+
+
 def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5,
-                 vid_manifest: dict | None = None, transition: float = 0.5):
+                 vid_manifest: dict | None = None, transition: float = 0.5,
+                 tts_manifest: dict | None = None):
     """从剧本生成 SRT 字幕。
 
     时间轴与 TTS 配音严格一致：基于成片真实时间轴（xfade 拼接），
@@ -806,28 +989,24 @@ def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5,
             continue
 
         seg = tl.get(sid, {"start": 0.0, "duration": float(scene_duration)})
-        per_dialogue = seg["duration"] / max(len(dialogues), 1)
-        cur = seg["start"]
+        # 字幕计时优先对齐真实 TTS 音频时长（声音-文字同步）
+        wins = _align_subtitle_windows(sid, dialogues, tts_manifest,
+                                       seg["start"], seg["duration"])
 
-        for d in dialogues:
-            char_name = d.get("character", "")
+        for d_idx, d in enumerate(dialogues):
             text = d.get("text", "")
-            # 查找角色名
-            for c in script.get("characters", []):
-                if c["id"] == char_name:
-                    char_name = c["name"]
-                    break
+            st, en = wins[d_idx] if d_idx < len(wins) else (seg["start"], seg["start"] + seg["duration"])
 
-            start_srt = format_srt_time(cur)
-            end_srt = format_srt_time(cur + per_dialogue)
+            start_srt = format_srt_time(st)
+            end_srt = format_srt_time(en)
 
             lines.append(f"{idx}")
             lines.append(f"{start_srt} --> {end_srt}")
-            lines.append(f"{char_name}：{text}")
+            # 字幕只显示台词本身，不带角色名与冒号
+            lines.append(f"{text}")
             lines.append("")
 
             idx += 1
-            cur += per_dialogue
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -985,13 +1164,15 @@ def _composition_timeline(script: dict, vid_manifest: dict,
 
 def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
                  scene_duration: int = 5,
-                 vid_manifest: dict | None = None) -> dict:
+                 vid_manifest: dict | None = None,
+                 checkpoint_key: str = "tts") -> dict:
     """为剧本对白生成 TTS 音频。优先 edge-tts（跨平台），回退到 macOS say。
-    
+
     vid_manifest: 实际存在的视频清单，用于精确对齐 TTS 时间戳。
+    checkpoint_key: 缓存标记键，编辑器重渲染时用不同键避免复用原片 TTS。
     """
 
-    if cp.is_done("tts"):
+    if cp.is_done(checkpoint_key):
         print("✅ TTS 已存在，跳过")
         manifest_path = audio_dir / "tts_manifest.json"
         if manifest_path.exists():
@@ -999,7 +1180,7 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
         return {}
 
     print(f"\n🎙️ 步骤 6：生成 TTS 配音...")
-    cp.mark_running("tts")
+    cp.mark_running(checkpoint_key)
     audio_dir.mkdir(parents=True, exist_ok=True)
 
     # 检测 TTS 引擎优先级：edge-tts > macOS say
@@ -1027,7 +1208,7 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
                 print("  ✅ edge-tts 自动安装成功")
             except Exception:
                 print("  ❌ 无法安装 edge-tts，跳过配音")
-                cp.mark_done("tts")
+                cp.mark_done(checkpoint_key)
                 return {}
 
     # 计算实际场景偏移（基于成片真实时间轴，与字幕一致）
@@ -1142,7 +1323,7 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
 
     manifest_path = audio_dir / "tts_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
-    cp.mark_done("tts")
+    cp.mark_done(checkpoint_key)
     print(f"  ✅ TTS 已保存：{audio_dir}（共 {idx} 条）")
     return manifest
 
@@ -1282,92 +1463,196 @@ def generate_lipsync(project_dir: pathlib.Path, script: dict,
 
 # ===================== 音效生成 =====================
 
+def _ambient_recipe_for(location: str, mood: str, action: str) -> str:
+    """根据场景文本挑选背景音配方名。"""
+    text = f"{location} {mood} {action}"
+    for keys, name in AMBIENT_KEYWORD_MAP:
+        if any(k in text for k in keys):
+            return name
+    return "neutral"
+
+
+def _synth_ambient_clip(out_path: pathlib.Path, dur: float, color: str,
+                        filt: str, add_drone: bool) -> bool:
+    """用 ffmpeg 本地合成一段与视频等长的场景环境音。"""
+    try:
+        out_path = pathlib.Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        dur = max(1.0, float(dur))
+        base = f"anoisesrc=color={color}:duration={dur}:amplitude=0.9"
+        fade = f"afade=t=in:st=0:d=0.6,afade=t=out:st={max(0.0, dur - 0.6):.2f}:d=0.6"
+        noise_filt = f"{filt},{fade}"
+        if add_drone:
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-i", base,
+                "-f", "lavfi", "-i", f"sine=frequency=56:duration={dur}",
+                "-filter_complex",
+                f"[0:a]{noise_filt}[n];[1:a]volume=0.22[d];"
+                f"[n][d]amix=inputs=2:duration=longest[a]",
+                "-map", "[a]", "-c:a", "libmp3lame", "-q:a", "4", str(out_path),
+            ]
+        else:
+            cmd = [
+                "ffmpeg", "-y",
+                "-f", "lavfi", "-i", base,
+                "-af", noise_filt,
+                "-c:a", "libmp3lame", "-q:a", "4", str(out_path),
+            ]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        return r.returncode == 0 and out_path.exists()
+    except Exception as e:
+        print(f"    ⚠️ 背景音合成失败 {out_path}: {e}")
+        return False
+
+
+def build_ambient_master(project_dir: pathlib.Path,
+                         segments: list[tuple], total_duration: float) -> pathlib.Path | None:
+    """把各场景环境音按成片时间轴拼成一条统一背景音轨。
+
+    segments: 有序列表 [(amb_path_or_None, start_sec, dur_sec)]，
+    顺序需与成片（xfade 拼接）一致。每个片段延迟到其起始秒数后混音。
+    返回 ambient_master.wav 路径，无有效片段返回 None。
+    """
+    inputs = []
+    parts = []
+    idx = 0
+    for amb, start, dur in segments:
+        if amb and pathlib.Path(amb).exists():
+            inputs += ["-i", str(amb)]
+        else:
+            inputs += ["-f", "lavfi", "-i",
+                       f"anullsrc=channel_layout=stereo:sample_rate=44100:duration={dur}"]
+        start_ms = int(start * 1000)
+        parts.append(f"[{idx}:a]adelay={start_ms}|{start_ms}[d{idx}]")
+        idx += 1
+    if idx == 0:
+        return None
+    amix = "".join(f"[d{i}]" for i in range(idx)) + f"amix=inputs={idx}:duration=longest[aamb]"
+    filt = ";".join(parts) + f";{amix};[aamb]volume=0.32,lowpass=f=9500[aout]"
+    out = project_dir / "ambient_master.wav"
+    cmd = ["ffmpeg", "-y"] + inputs + ["-filter_complex", filt, "-map", "[aout]",
+           "-t", str(total_duration), "-c:a", "pcm_s16le", str(out)]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if r.returncode == 0 and out.exists():
+        return out
+    print(f"  ⚠️ 背景音主控合成失败：{r.stderr[-200:]}")
+    return None
+
+
 def generate_sfx(client: AgnesClient, script: dict, sfx_dir: pathlib.Path,
-                 cp: Checkpoint, rate_limiter: RateLimiter) -> dict:
-    """为场景生成音效描述（文本），后续可用免费音效库匹配。"""
+                 cp: Checkpoint, rate_limiter: RateLimiter,
+                 vid_manifest: dict | None = None,
+                 scene_duration: int = 5) -> dict:
+    """为场景生成本地合成的环境背景音（ffmpeg，免费），写入 sfx_manifest。
+
+    不再只是"描述文本"，而是真实可混的音轨：按 location/mood 关键词选择
+    合成配方（风/水/火/战/静/法术…），每个场景一段与视频等长的环境音。
+    """
 
     if cp.is_done("sfx"):
-        print("✅ 音效已存在，跳过")
+        print("✅ 背景音已存在，跳过")
         manifest_path = sfx_dir / "sfx_manifest.json"
         if manifest_path.exists():
             return json.loads(manifest_path.read_text())
         return {}
 
-    print(f"\n🔊 步骤 7：生成音效描述...")
+    print(f"\n🔊 步骤 7：合成场景背景音（本地 ffmpeg）...")
     cp.mark_running("sfx")
+    sfx_dir.mkdir(parents=True, exist_ok=True)
 
     manifest = {}
-
     for scene in script["scenes"]:
         sid = scene["id"]
-        action = scene.get("action", "")
-        mood = scene.get("mood", "")
         location = scene.get("location", "")
+        mood = scene.get("mood", "")
+        action = scene.get("action", "")
+        recipe_name = _ambient_recipe_for(location, mood, action)
+        color, filt = AMBIENT_RECIPES[recipe_name]
+        add_drone = mood in AMBIENT_DRONE_MOODS
 
-        # 用 AI 分析场景，输出音效描述
-        prompt = f"""分析以下漫剧场景，输出适合的音效描述（英文关键词，用于搜索免费音效库）。
+        # 该场景的真实时长（与视频一致，保证对齐）
+        dur = float(scene_duration)
+        if vid_manifest and vid_manifest.get(sid):
+            vp = pathlib.Path(vid_manifest[sid])
+            if vp.exists():
+                dur = get_video_duration(vp)
 
-场景：{location}
-动作：{action}
-氛围：{mood}
-
-输出 JSON 格式：
-{{
-  "ambient": "环境音描述（如：wind, forest, peaceful）",
-  "actions": ["动作音效1", "动作音效2"],
-  "mood": "氛围音效（如：tension, mysterious）"
-}}
-
-只输出 JSON，不要其他文字。"""
-
-        try:
-            rate_limiter.wait()
-            result = client.chat(
-                messages=[{"role": "user", "content": prompt}],
-                model="agnes-1.5-flash",  # 用轻量模型
-                temperature=0.7,
-                max_tokens=512,
-            )
-
-            # 提取 JSON
-            json_str = result
-            if "```json" in json_str:
-                json_str = json_str.split("```json")[1].split("```")[0]
-            elif "```" in json_str:
-                json_str = json_str.split("```")[1].split("```")[0]
-
-            sfx_desc = json.loads(json_str.strip())
-
-            # 保存描述
-            manifest[sid] = {
-                "description": sfx_desc,
-                "keywords": " ".join([
-                    sfx_desc.get("ambient", ""),
-                    " ".join(sfx_desc.get("actions", [])),
-                    sfx_desc.get("mood", "")
-                ]).strip(),
-            }
-
-            print(f"  ✅ {sid}: {manifest[sid]['keywords'][:50]}...")
-
-        except Exception as e:
-            print(f"  ⚠️ {sid} 音效分析失败：{e}")
-            manifest[sid] = {"description": {}, "keywords": ""}
+        out_path = sfx_dir / f"{sid}_amb.mp3"
+        ok = _synth_ambient_clip(out_path, dur, color, filt, add_drone)
+        manifest[sid] = {
+            "path": str(out_path) if ok else "",
+            "recipe": recipe_name,
+            "mood": mood,
+            "location": location,
+            "duration": round(dur, 3),
+        }
+        print(f"  {'✅' if ok else '⚠️'} {sid}: {recipe_name} 背景音 ({dur:.1f}s)")
 
     manifest_path = sfx_dir / "sfx_manifest.json"
-    sfx_dir.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
     cp.mark_done("sfx")
-    print(f"  ✅ 音效描述已保存：{sfx_dir}")
+    print(f"  ✅ 背景音已合成：{sfx_dir}")
     return manifest
 
 
 # ===================== 音频混音 =====================
 
+def _build_vid_manifest(project_dir: pathlib.Path, script: dict) -> dict:
+    """从 videos 目录重建视频清单（仅含已存在文件）。"""
+    vd = project_dir / "videos"
+    vm = {}
+    for s in script.get("scenes", []):
+        p = vd / f"{s['id']}.mp4"
+        if p.exists():
+            vm[s["id"]] = str(p)
+    return vm
+
+
+def _build_tts_track(tts_manifest: dict, out_path: pathlib.Path) -> pathlib.Path | None:
+    """把 TTS manifest 中每条配音按 start 延迟对齐，混合成一条音轨。
+
+    供主流程 mix_audio 与编辑器 edit_render 共用，保证配音时间轴与字幕一致。
+    """
+    if not tts_manifest:
+        return None
+    tts_items = sorted(tts_manifest.items(), key=lambda x: x[1]["start"])
+    filter_parts = []
+    inputs = []
+    input_idx = 0
+    for key, info in tts_items:
+        tts_path = pathlib.Path(info["path"])
+        if not tts_path.exists():
+            continue
+        start = info["start"]
+        inputs += ["-i", str(tts_path)]
+        delay_ms = int(start * 1000)
+        filter_parts.append(f"[{input_idx}:a]adelay={delay_ms}|{delay_ms}[a{input_idx}]")
+        input_idx += 1
+    if not filter_parts:
+        return None
+    n = input_idx
+    amix_inputs = "".join([f"[a{i}]" for i in range(n)])
+    filter_complex = ";".join(filter_parts) + f";{amix_inputs}amix=inputs={n}:duration=longest[aout]"
+    out_path = pathlib.Path(out_path)
+    cmd = ["ffmpeg", "-y"] + inputs + ["-filter_complex", filter_complex, "-map", "[aout]",
+           "-c:a", "aac", "-b:a", "128k", str(out_path)]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if r.returncode == 0 and out_path.exists():
+            return out_path
+        print(f"  ⚠️ TTS 轨道合成失败：{r.stderr[:200]}")
+    except Exception as e:
+        print(f"  ⚠️ TTS 轨道合成出错：{e}")
+    return None
+
+
+
 def mix_audio(project_dir: pathlib.Path, script: dict,
               tts_manifest: dict, sfx_manifest: dict,
-              cp: Checkpoint, scene_duration: int = 5) -> pathlib.Path | None:
-    """混合视频 + TTS 配音 + 音效（可选占位）。"""
+              cp: Checkpoint, scene_duration: int = 5,
+              vid_manifest: dict | None = None) -> pathlib.Path | None:
+    """混合视频 + TTS 配音 + 场景背景音（真实音轨）。"""
 
     if cp.is_done("mix"):
         final = project_dir / "final_with_audio.mp4"
@@ -1388,74 +1673,51 @@ def mix_audio(project_dir: pathlib.Path, script: dict,
         return None
     print(f"  使用视频：{video_path.name}")
 
+    if vid_manifest is None:
+        vid_manifest = _build_vid_manifest(project_dir, script)
+
     # 构建音频轨道
     audio_tracks = []
 
     # 1. TTS 轨道（按时间对齐）
     if tts_manifest:
         print(f"  合成 {len(tts_manifest)} 条 TTS...")
+        tts_mixed = _build_tts_track(tts_manifest, project_dir / "tts_mixed.m4a")
+        if tts_mixed:
+            audio_tracks.append(("tts", tts_mixed))
+            print(f"  ✅ TTS 轨道合成完成")
 
-        # 创建 concat 列表，按时间排序
-        tts_items = sorted(tts_manifest.items(), key=lambda x: x[1]["start"])
+    # 1.5 场景背景音（按成片时间轴拼接成统一环境音轨，置于配音之下）
+    if sfx_manifest:
+        segs = []
+        if vid_manifest:
+            tl = _composition_timeline(script, vid_manifest, scene_duration)
+            for scene in script["scenes"]:
+                sid = scene["id"]
+                info = sfx_manifest.get(sid, {})
+                if sid in tl and info.get("path"):
+                    segs.append((info["path"], tl[sid]["start"], tl[sid]["duration"]))
+        if segs:
+            total = get_video_duration(video_path)
+            print(f"  合成场景背景音轨（{len(segs)} 段，总长 {total:.1f}s）...")
+            ambient_master = build_ambient_master(project_dir, segs, total)
+            if ambient_master:
+                audio_tracks.append(("ambient", ambient_master))
+                print(f"  ✅ 背景音轨：{ambient_master.name}")
 
-        # 生成静音填充 + TTS 的复杂滤镜
-        filter_parts = []
-        inputs = []
-        input_idx = 0
-
-        for key, info in tts_items:
-            tts_path = pathlib.Path(info["path"])
-            if not tts_path.exists():
-                continue
-
-            start = info["start"]
-            # 添加输入
-            inputs += ["-i", str(tts_path)]
-            # adelay 滤镜
-            delay_ms = int(start * 1000)
-            filter_parts.append(f"[{input_idx}:a]adelay={delay_ms}|{delay_ms}[a{input_idx}]")
-            input_idx += 1
-
-        if filter_parts:
-            # 混合所有音频
-            n = input_idx
-            amix_inputs = "".join([f"[a{i}]" for i in range(n)])
-            filter_complex = ";".join(filter_parts) + f";{amix_inputs}amix=inputs={n}:duration=longest[aout]"
-
-            tts_mixed = project_dir / "tts_mixed.m4a"
-            cmd = ["ffmpeg", "-y"] + inputs + ["-filter_complex", filter_complex, "-map", "[aout]",
-                   "-c:a", "aac", "-b:a", "128k", str(tts_mixed)]
-
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                if result.returncode == 0 and tts_mixed.exists():
-                    audio_tracks.append(("tts", tts_mixed))
-                    print(f"  ✅ TTS 轨道合成完成")
-                else:
-                    print(f"  ⚠️ TTS 混音失败：{result.stderr[:200]}")
-            except Exception as e:
-                print(f"  ⚠️ TTS 混音出错：{e}")
-
-    # 2. 混合视频 + 音频
-    final_video = video_path  # 使用上面选中的视频
+    # 2. 混合视频 + 音频（配音 + 场景背景音）
     final_audio = project_dir / "final_with_audio.mp4"
 
     if audio_tracks:
-        # 有音频轨道，混合
-        cmd = ["ffmpeg", "-y", "-i", str(final_video)]
+        cmd = ["ffmpeg", "-y", "-i", str(video_path)]
         for _, audio_path in audio_tracks:
             cmd += ["-i", str(audio_path)]
 
-        # 简单混合：视频 + 所有音频
-        if len(audio_tracks) == 1:
-            cmd += ["-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", str(final_audio)]
-        else:
-            # 多音频混合
-            n_audio = len(audio_tracks)
-            amix = "".join([f"[{i+1}:a]" for i in range(n_audio)])
-            filter_complex = f"{amix}amix=inputs={n_audio}:duration=first[aout]"
-            cmd += ["-filter_complex", filter_complex, "-map", "0:v", "-map", "[aout]",
-                    "-c:v", "copy", "-c:a", "aac", "-b:a", "128k", "-shortest", str(final_audio)]
+        n_audio = len(audio_tracks)
+        amix = "".join([f"[{i+1}:a]" for i in range(n_audio)])
+        filter_complex = f"{amix}amix=inputs={n_audio}:duration=longest[aout]"
+        cmd += ["-filter_complex", filter_complex, "-map", "0:v", "-map", "[aout]",
+                "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", str(final_audio)]
 
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
@@ -1469,7 +1731,392 @@ def mix_audio(project_dir: pathlib.Path, script: dict,
             print(f"  ⚠️ 混音出错：{e}")
 
     print("  ⚠️ 无音频可混合，返回原视频")
-    return final_video
+    return video_path
+
+
+# ===================== 编辑器：剪辑输出 =====================
+
+def _xfade_concat(clip_paths: list, out_path: pathlib.Path, transition: float = 0.5):
+    """把多个视频片段用 xfade 转场拼接成一个文件（与 edit_final 同逻辑）。"""
+    out_path = pathlib.Path(out_path)
+    if len(clip_paths) == 1:
+        import shutil
+        shutil.copy2(clip_paths[0], out_path)
+        return out_path
+
+    n = len(clip_paths)
+    inputs = []
+    for cp_ in clip_paths:
+        inputs += ["-i", str(cp_)]
+
+    durations = [get_video_duration(p) for p in clip_paths]
+    filter_parts = []
+    offset = durations[0] - transition
+    for i in range(n - 1):
+        in_a = f"[{i}:v]" if i == 0 else f"[v{i-1}{i}]"
+        in_b = f"[{i+1}:v]"
+        out_label = f"[v{i}{i+1}]" if i < n - 2 else "[vout]"
+        filter_parts.append(
+            f"{in_a}{in_b}xfade=transition=fade:duration={transition}:offset={offset}{out_label}")
+        if i < n - 2:
+            offset += durations[i + 1] - transition
+
+    vfilter = ";".join(filter_parts)
+    cmd = ["ffmpeg", "-y"] + inputs + ["-filter_complex", vfilter, "-map", "[vout]",
+           "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+           "-an", str(out_path)]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if r.returncode != 0:
+        print(f"  ⚠️ 剪辑拼接失败：{r.stderr[-200:]}")
+        return None
+    return out_path
+
+
+def _generate_srt_for_timeline(script: dict, tl: list, out_path: pathlib.Path, disabled=None,
+                                tts_manifest: dict | None = None):
+    """根据显式时间轴 tl=[(sid, start, dur), ...] 生成 SRT（与 generate_srt 同源）。
+
+    disabled: 需要关闭字幕的 sid 集合（编辑器逐镜/全局开关）。
+    tts_manifest: 真实配音清单，用于让字幕与声音精确对齐。
+    """
+    disabled = set(disabled or [])
+    lines = []
+    idx = 1
+    tl_map = {sid: (start, dur) for sid, start, dur in tl}
+    for scene in script["scenes"]:
+        sid = scene["id"]
+        if sid not in tl_map:
+            continue
+        if sid in disabled:
+            continue
+        start, dur = tl_map[sid]
+        dialogues = scene.get("dialogue", [])
+        if not dialogues:
+            continue
+        # 字幕计时优先对齐真实 TTS 音频时长（声音-文字同步）
+        wins = _align_subtitle_windows(sid, dialogues, tts_manifest, start, dur)
+        for d_idx, d in enumerate(dialogues):
+            text = d.get("text", "")
+            st, en = wins[d_idx] if d_idx < len(wins) else (start, start + dur)
+            lines.append(str(idx))
+            lines.append(f"{format_srt_time(st)} --> {format_srt_time(en)}")
+            # 字幕只显示台词本身，不带角色名与冒号
+            lines.append(f"{text}")
+            lines.append("")
+            idx += 1
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _load_sfx_m(project_dir: pathlib.Path) -> dict:
+    """读取 sfx_manifest.json，缺省返回空。"""
+    sp = project_dir / "sfx" / "sfx_manifest.json"
+    if sp.exists():
+        try:
+            return json.loads(sp.read_text())
+        except Exception:
+            return {}
+    return {}
+
+
+def _build_scene_voice(sid: str, tts_m_full: dict, out_dir: pathlib.Path):
+    """把某镜头所有对白 TTS 按场景内偏移聚合成一条镜头配音片段。
+
+    返回临时片段路径；无有效对白返回 None。
+    """
+    if not tts_m_full:
+        return None
+    entries = [(k, v) for k, v in tts_m_full.items() if k.startswith(f"{sid}_")]
+    if not entries:
+        return None
+    entries.sort(key=lambda kv: int(kv[0].split("_")[-1]))
+    per = float(entries[0][1].get("scene_duration", 1.0))
+    inputs = []
+    parts = []
+    for k, (kk, info) in enumerate(entries):
+        p = pathlib.Path(info["path"])
+        if not p.exists():
+            continue
+        inputs += ["-i", str(p)]
+        d = int(k * per * 1000)
+        parts.append(f"[{k}:a]adelay={d}|{d}[v{k}]")
+    if not parts:
+        return None
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"voice_{sid}.m4a"
+    n = len(parts)
+    amix = "".join(f"[v{i}]" for i in range(n))
+    filt = ";".join(parts) + f";{amix}amix=inputs={n}:duration=longest[vo]"
+    r = subprocess.run(["ffmpeg", "-y"] + inputs + ["-filter_complex", filt,
+                       "-map", "[vo]", "-c:a", "aac", "-b:a", "128k", str(out)],
+                      capture_output=True, text=True, timeout=60)
+    if r.returncode == 0 and out.exists():
+        return out
+    return None
+
+
+def edit_render(project_dir: pathlib.Path, script: dict, edits: list,
+                cp: Checkpoint, scene_duration: int = 5,
+                with_audio: bool = True,
+                audio_tracks: dict | None = None,
+                audio_clips: dict | None = None,
+                subtitle_disabled: list | None = None) -> pathlib.Path | None:
+    """编辑器导出：对场景做裁剪(in/out)/启停/重排后重新拼接成片。
+
+    edits: 有序列表，每项 {"sid", "in"(秒), "out"(秒), "enabled"(bool)}
+    返回 edited_final.mp4（无声）或 edited_final_with_audio.mp4（含配音+背景音）。
+    """
+    print(f"\n✂️ 编辑器导出（{len(edits)} 个片段操作）...")
+    vid_dir = project_dir / "videos"
+    clip_dir = project_dir / "edit_clips"
+    clip_dir.mkdir(parents=True, exist_ok=True)
+
+    clips = []  # (clip_path, sid, dur)
+    for e in edits:
+        if not e.get("enabled", True):
+            continue
+        sid = e["sid"]
+        src = vid_dir / f"{sid}.mp4"
+        if not src.exists():
+            print(f"  ⚠️ 片段 {sid} 视频不存在，跳过")
+            continue
+        d = get_video_duration(src)
+        in_s = max(0.0, float(e.get("in", 0.0) or 0.0))
+        out_s = min(d, float(e.get("out", d) or d))
+        if out_s - in_s < 0.2:
+            continue
+        clip = clip_dir / f"{sid}.mp4"
+        cmd = ["ffmpeg", "-y", "-ss", f"{in_s:.3f}", "-to", f"{out_s:.3f}",
+               "-i", str(src), "-c:v", "libx264", "-crf", "23", "-preset", "fast",
+               "-an", str(clip)]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if r.returncode == 0 and clip.exists():
+            clips.append((clip, sid, out_s - in_s))
+            print(f"  ✅ 片段 {sid}: {in_s:.1f}s→{out_s:.1f}s")
+        else:
+            print(f"  ⚠️ 片段 {sid} 裁剪失败")
+
+    if not clips:
+        print("  ⚠️ 没有可用片段")
+        return None
+
+    edited = project_dir / "edited_final.mp4"
+    res = _xfade_concat([c[0] for c in clips], edited, transition=0.5)
+    if not res or not edited.exists():
+        return None
+
+    # 剪辑后时间轴（与 xfade 拼接一致）
+    tl = []
+    cursor = 0.0
+    first = True
+    for clip, sid, dur in clips:
+        if first:
+            tl.append((sid, 0.0, dur))
+            first = False
+        else:
+            tl.append((sid, cursor, dur - 0.5))
+        cursor = tl[-1][1] + tl[-1][2]
+
+    # 字幕（基于剪辑后时间轴）
+    srt = project_dir / "edited_subtitle.srt"
+    _generate_srt_for_timeline(script, tl, srt, disabled=subtitle_disabled)
+    burned = burn_subtitles(project_dir, srt, edited)
+    edited = burned if (burned and burned.exists()) else edited
+
+    if not with_audio:
+        print(f"  ✅ 无声剪辑成片：{edited}")
+        return edited
+
+    # ---------- 音频：分轨混音 ----------
+    tts_m = None  # 整条合成分支里生成的配音清单（用于字幕对齐）
+    # 向后兼容：未提供逐镜头裁剪时，用整条合成
+    if audio_clips is None:
+        if audio_tracks is None:
+            audio_tracks = (
+                {"tts": {"enabled": True, "volume": 1.0},
+                 "ambient": {"enabled": True, "volume": 0.32}}
+                if with_audio else
+                {"tts": {"enabled": False}, "ambient": {"enabled": False}}
+            )
+        tt_cfg = audio_tracks.get("tts") or {}
+        amb_cfg = audio_tracks.get("ambient") or {}
+        music_cfg = audio_tracks.get("music") or {}
+        order_sids = [sid for _, sid, _ in clips]
+        scene_by_id = {s["id"]: s for s in script.get("scenes", [])}
+        sub_script = {**script, "scenes": [scene_by_id[s] for s in order_sids if s in scene_by_id]}
+        input_tracks = []
+        if tt_cfg.get("enabled", False):
+            temp_vm = {sid: str(c) for c, sid, _ in clips}
+            cp.data.pop("edit_tts", None)
+            tts_m = generate_tts(sub_script, project_dir / "edit_audio", cp,
+                                 scene_duration=scene_duration, vid_manifest=temp_vm,
+                                 checkpoint_key="edit_tts")
+            tts_mixed = _build_tts_track(tts_m, project_dir / "edit_audio" / "tts_mixed.m4a")
+            if tts_mixed:
+                input_tracks.append((tts_mixed, float(tt_cfg.get("volume", 1.0))))
+        if amb_cfg.get("enabled", False):
+            sfx_m = _load_sfx_m(project_dir)
+            segs = [(sfx_m[sid]["path"], st, du) for sid, st, du in tl
+                    if sid in sfx_m and sfx_m[sid].get("path")]
+            if segs:
+                amb = build_ambient_master(project_dir, segs, get_video_duration(edited))
+                if amb:
+                    input_tracks.append((amb, float(amb_cfg.get("volume", 0.32))))
+        if music_cfg.get("enabled", False) and music_cfg.get("path"):
+            mp = pathlib.Path(music_cfg["path"])
+            if not mp.is_absolute():
+                mp = project_dir / mp
+            if mp.exists():
+                input_tracks.append((mp, float(music_cfg.get("volume", 0.5))))
+        final_a = project_dir / "edited_final_with_audio.mp4"
+        if not input_tracks:
+            print("  ✅ 剪辑成片（无启用音频轨）")
+            return edited
+        inputs = ["-i", str(edited)]
+        vp = []
+        for idx, (ap, vol) in enumerate(input_tracks):
+            inputs += ["-i", str(ap)]
+            vp.append(f"[{idx+1}:a]volume={vol:.3f}[a{idx}]")
+        mix = "".join(f"[a{i}]" for i in range(len(input_tracks)))
+        filt = ";".join(vp) + f";{mix}amix=inputs={len(input_tracks)}:duration=longest[aout]"
+        r = subprocess.run(["ffmpeg", "-y"] + inputs + ["-filter_complex", filt,
+                           "-map", "0:v", "-map", "[aout]", "-c:v", "copy",
+                           "-c:a", "aac", "-b:a", "160k", "-shortest", str(final_a)],
+                          capture_output=True, text=True, timeout=180)
+        if r.returncode == 0 and final_a.exists():
+            # 字幕与配音对齐：用真实 TTS 时长重新烧录字幕到带配音成片
+            if tts_m:
+                srt_a = project_dir / "edited_subtitle_aligned.srt"
+                _generate_srt_for_timeline(script, tl, srt_a,
+                                            disabled=subtitle_disabled, tts_manifest=tts_m)
+                burned_a = burn_subtitles(project_dir, srt_a, final_a)
+                if burned_a and burned_a.exists():
+                    final_a = burned_a
+            print(f"  ✅ 剪辑成片（整条合成，{len(input_tracks)} 轨）")
+            return final_a
+        print(f"  ⚠️ 音频混合失败：{r.stderr[-200:]}")
+        return edited
+
+    # ===== 逐镜头裁剪模式（每条轨道的每个镜头片段可独立裁剪）=====
+    tt_cfg = audio_tracks.get("tts") or {}
+    amb_cfg = audio_tracks.get("ambient") or {}
+    music_cfg = audio_tracks.get("music") or {}
+
+    if tt_cfg.get("enabled", False):
+        order_sids = [sid for _, sid, _ in clips]
+        scene_by_id = {s["id"]: s for s in script.get("scenes", [])}
+        sub_script = {**script, "scenes": [scene_by_id[s] for s in order_sids if s in scene_by_id]}
+        temp_vm = {sid: str(c) for c, sid, _ in clips}
+        cp.data.pop("edit_tts", None)
+        tts_m_full = generate_tts(sub_script, project_dir / "edit_audio", cp,
+                                  scene_duration=scene_duration, vid_manifest=temp_vm,
+                                  checkpoint_key="edit_tts")
+    else:
+        tts_m_full = {}
+
+    audio_inputs = []
+    def add_clip(path, ss, to, delay_ms):
+        if ss is not None and ss <= 0 and (to is None or to >= 9999):
+            audio_inputs.append((str(path), None, None, delay_ms))
+        else:
+            audio_inputs.append((str(path), ss, to, delay_ms))
+        return len(audio_inputs)
+
+    parts = []
+    track_labels = []
+
+    if tt_cfg.get("enabled", False):
+        tts_clips = (audio_clips or {}).get("tts") or {}
+        gi_list = []
+        for sid, start, dur in tl:
+            c = tts_clips.get(sid)
+            if c and not c.get("enabled", True):
+                continue
+            voice = _build_scene_voice(sid, tts_m_full, project_dir / "edit_clips")
+            if not voice:
+                continue
+            cin = float(c["in"]) if (c and c.get("in") is not None) else 0.0
+            cout = float(c["out"]) if (c and c.get("out") is not None) else 9999.0
+            gi = add_clip(voice, cin, cout, int(start * 1000))
+            parts.append(f"[{gi}:a]adelay={int(start*1000)}|{int(start*1000)}[tc{gi}]")
+            gi_list.append(gi)
+        if gi_list:
+            if len(gi_list) == 1:
+                parts.append(f"[tc{gi_list[0]}]volume={float(tt_cfg.get('volume',1.0)):.3f}[tl]")
+            else:
+                ain = "".join(f"[tc{g}]" for g in gi_list)
+                parts.append(f"{ain}amix=inputs={len(gi_list)}:duration=longest[tm];[tm]volume={float(tt_cfg.get('volume',1.0)):.3f}[tl]")
+            track_labels.append("[tl]")
+
+    if amb_cfg.get("enabled", False):
+        sfx_m = _load_sfx_m(project_dir)
+        amb_clips = (audio_clips or {}).get("ambient") or {}
+        gi_list = []
+        for sid, start, dur in tl:
+            c = amb_clips.get(sid)
+            if c and not c.get("enabled", True):
+                continue
+            info = sfx_m.get(sid)
+            if not info or not info.get("path"):
+                continue
+            cin = float(c["in"]) if (c and c.get("in") is not None) else 0.0
+            cout = float(c["out"]) if (c and c.get("out") is not None) else 9999.0
+            gi = add_clip(info["path"], cin, cout, int(start * 1000))
+            parts.append(f"[{gi}:a]adelay={int(start*1000)}|{int(start*1000)}[ac{gi}]")
+            gi_list.append(gi)
+        if gi_list:
+            if len(gi_list) == 1:
+                parts.append(f"[ac{gi_list[0]}]volume={float(amb_cfg.get('volume',0.32)):.3f}[al]")
+            else:
+                ain = "".join(f"[ac{g}]" for g in gi_list)
+                parts.append(f"{ain}amix=inputs={len(gi_list)}:duration=longest[am];[am]volume={float(amb_cfg.get('volume',0.32)):.3f}[al]")
+            track_labels.append("[al]")
+
+    if music_cfg.get("enabled", False) and music_cfg.get("path"):
+        mp = pathlib.Path(music_cfg["path"])
+        if not mp.is_absolute():
+            mp = project_dir / mp
+        if mp.exists():
+            mc = (audio_clips or {}).get("music") or {}
+            cin = float(mc.get("in", 0) or 0)
+            cout = float(mc.get("out", 0) or 0)
+            gi = add_clip(mp, cin, cout if cout > 0 else 9999, 0)
+            parts.append(f"[{gi}:a]volume={float(music_cfg.get('volume',0.5)):.3f}[ml]")
+            track_labels.append("[ml]")
+
+    final_a = project_dir / "edited_final_with_audio.mp4"
+    if not track_labels:
+        print("  ✅ 剪辑成片（无启用音频轨）")
+        return edited
+    inputs = ["-i", str(edited)]
+    for (path, ss, to, dm) in audio_inputs:
+        if ss is None:
+            inputs += ["-i", path]
+        else:
+            inputs += ["-ss", f"{ss:.3f}", "-to", f"{to:.3f}", "-i", path]
+    if len(track_labels) == 1:
+        filt = ";".join(parts)
+        map_a = track_labels[0]
+    else:
+        parts.append("".join(track_labels) + f"amix=inputs={len(track_labels)}:duration=longest[aout]")
+        filt = ";".join(parts)
+        map_a = "[aout]"
+    r = subprocess.run(["ffmpeg", "-y"] + inputs + ["-filter_complex", filt,
+                       "-map", "0:v", "-map", map_a, "-c:v", "copy",
+                       "-c:a", "aac", "-b:a", "160k", "-shortest", str(final_a)],
+                      capture_output=True, text=True, timeout=240)
+    if r.returncode == 0 and final_a.exists():
+        # 字幕与配音对齐：用真实 TTS 时长重新烧录字幕到带配音成片
+        if tts_m_full:
+            srt_a = project_dir / "edited_subtitle_aligned.srt"
+            _generate_srt_for_timeline(script, tl, srt_a,
+                                        disabled=subtitle_disabled, tts_manifest=tts_m_full)
+            burned_a = burn_subtitles(project_dir, srt_a, final_a)
+            if burned_a and burned_a.exists():
+                final_a = burned_a
+        print(f"  ✅ 剪辑成片（逐镜头分轨混音，{len(track_labels)} 轨）")
+        return final_a
+    print(f"  ⚠️ 音频混合失败：{r.stderr[-200:]}")
+    return edited
 
 
 # ===================== 主流程 =====================
@@ -1551,6 +2198,14 @@ def main():
     else:
         print("\n🎙️ TTS 配音已禁用")
 
+    # 字幕与配音对齐：TTS 已生成真实时长，重新生成 SRT（在烧录前覆盖），
+    # 使每句字幕的起止严格匹配对应配音，实现声音-文字同步。
+    if tts_manifest:
+        srt_path = project_dir / "subtitle.srt"
+        generate_srt(script, srt_path, scene_duration=args.scene_duration,
+                     vid_manifest=vid_manifest, tts_manifest=tts_manifest)
+        print(f"  🔤 字幕已按配音时长对齐（{len(tts_manifest)} 条）")
+
     # Step 6.5: 口型同步
     lipsync_manifest = {}
     if not args.no_tts and tts_manifest:
@@ -1559,11 +2214,12 @@ def main():
             scene_duration=args.scene_duration,
         )
 
-    # Step 7: 音效描述
+    # Step 7: 音效（真实场景背景音）
     sfx_manifest = {}
     if not args.no_sfx:
         sfx_manifest = generate_sfx(
             client, script, project_dir / "sfx", cp, rl,
+            vid_manifest=vid_manifest, scene_duration=args.scene_duration,
         )
     else:
         print("\n🔊 音效已禁用")
@@ -1603,7 +2259,7 @@ def main():
     if tts_manifest or sfx_manifest:
         final_with_audio = mix_audio(
             project_dir, script, tts_manifest, sfx_manifest, cp,
-            scene_duration=args.scene_duration,
+            scene_duration=args.scene_duration, vid_manifest=vid_manifest,
         )
 
     # 字幕烧录：确保最终交付的成片都带中文字幕

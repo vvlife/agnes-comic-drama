@@ -122,6 +122,39 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
 /* ===== Panels ===== */
 .panel { display: none; }
 .panel.active { display: block; }
+.hidden { display: none !important; }
+
+/* ===== Landing Page (生成器落地页) ===== */
+#landing { max-width: 920px; margin: 0 auto; padding: 30px 0 60px; }
+.landing-hero { text-align: center; padding: 36px 0 26px; }
+.landing-logo { font-size: 64px; line-height: 1; margin-bottom: 14px; }
+.landing-title { font-size: 40px; font-weight: 800;
+  background: linear-gradient(135deg, var(--accent2), var(--accent), var(--success));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.landing-sub { color: var(--text2); margin-top: 12px; font-size: 16px; }
+.landing-cta { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 28px; }
+.landing-btn-lg { padding: 14px 28px; font-size: 15px; font-weight: 600; }
+.landing-section-title { font-size: 13px; color: var(--text3); text-transform: uppercase;
+  letter-spacing: .1em; margin: 38px 0 14px; font-weight: 700; }
+.landing-features { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 16px; }
+.landing-feature { background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 22px; cursor: pointer; transition: .18s; }
+.landing-feature:hover { border-color: var(--accent); transform: translateY(-3px);
+  box-shadow: 0 8px 26px var(--glow); }
+.lf-ic { font-size: 32px; margin-bottom: 12px; }
+.lf-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.lf-desc { font-size: 13px; color: var(--text2); line-height: 1.5; }
+.landing-recent { display: flex; flex-direction: column; gap: 10px; }
+.landing-recent-item { display: flex; align-items: center; gap: 14px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; cursor: pointer; transition: .15s; }
+.landing-recent-item:hover { background: var(--surface2); border-color: var(--accent); }
+.lri-ic { font-size: 24px; }
+.lri-info { flex: 1; min-width: 0; }
+.lri-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lri-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.lri-go { color: var(--text3); font-size: 18px; }
+.landing-recent-empty, .landing-recent-loading { color: var(--text3); font-size: 14px;
+  padding: 18px; text-align: center; }
 
 /* ===== Card ===== */
 .card {
@@ -421,17 +454,59 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
 </style>
+<link rel="stylesheet" href="/sidebar.css">
 </head>
 <body>
 <div class="app">
+
+  <!-- ===== Landing Page (落地页) ===== -->
+  <section id="landing">
+    <div class="landing-hero">
+      <div class="landing-logo">🎭</div>
+      <h1 class="landing-title">Agnes 漫剧生成器</h1>
+      <p class="landing-sub">免费 AI 漫剧 · 脚本 → 角色 → 成片，一站式创作你的专属短剧</p>
+      <div class="landing-cta">
+        <button class="btn-primary landing-btn-lg" onclick="openNewProjectModal()">🚀 创建新漫剧</button>
+        <button class="btn-secondary landing-btn-lg" onclick="openProjectsModal()">📂 打开项目</button>
+        <button class="btn-secondary landing-btn-lg" onclick="openAutoModal()">🤖 自动模式</button>
+      </div>
+    </div>
+
+    <div class="landing-section-title">创作流程</div>
+    <div class="landing-features">
+      <div class="landing-feature" onclick="enterWorkspace(0)">
+        <div class="lf-ic">📝</div>
+        <div class="lf-title">脚本创作</div>
+        <div class="lf-desc">输入主题与风格，AI 生成分镜脚本与角色设定</div>
+      </div>
+      <div class="landing-feature" onclick="enterWorkspace(1)">
+        <div class="lf-ic">🎨</div>
+        <div class="lf-title">角色卡</div>
+        <div class="lf-desc">一键生成角色立绘与设定卡</div>
+      </div>
+      <div class="landing-feature" onclick="enterWorkspace(2)">
+        <div class="lf-ic">🖼️</div>
+        <div class="lf-title">分镜与视频</div>
+        <div class="lf-desc">生成分镜图与视频片段，拼接成片</div>
+      </div>
+      <div class="landing-feature" onclick="enterEditor()">
+        <div class="lf-ic">✂️</div>
+        <div class="lf-title">多轨剪辑</div>
+        <div class="lf-desc">进入剪辑器做精细化时间轴剪辑</div>
+      </div>
+    </div>
+
+    <div class="landing-section-title">最近项目</div>
+    <div id="landing-recent" class="landing-recent">
+      <div class="landing-recent-loading">加载中…</div>
+    </div>
+  </section>
+
+  <!-- ===== Workspace (进入项目后显示) ===== -->
+  <section id="workspace" class="hidden">
   <header>
     <h1>🎭 Agnes 漫剧生成器</h1>
     <p>免费 AI 漫剧 · 脚本 → 角色 → 成片</p>
-    <div class="header-actions">
-      <button onclick="openAutoModal()" style="background:var(--accent);color:white">🚀 自动模式</button>
-      <button onclick="openProjectsModal()">📂 项目</button>
-      <button onclick="openSettingsModal()">⚙️ 设置</button>
-    </div>
   </header>
 
   <!-- Step Tabs -->
@@ -577,6 +652,7 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
     </div>
     <div id="prod-job" class="job-panel" style="display:none"></div>
   </div>
+  </section><!-- /workspace -->
 </div>
 
 <!-- Settings Modal -->
@@ -914,6 +990,8 @@ async function createProject() {
 
 async function loadProject(projectId) {
   closeModal('modal-projects');
+  window.__PROJECT_ID__ = projectId;
+  showWorkspace();
   try {
     const data = await api(`/api/projects/${projectId}`);
     currentProject = projectId;
@@ -1383,6 +1461,12 @@ async function deleteSceneBySid(sid) {
 }
 
 // ===== Auto Mode =====
+function openEditor() {
+  const id = currentProject || (window.__firstProjectId || '');
+  if (!id) { alert('请先选择或创建一个项目'); return; }
+  window.open('/editor.html?project=' + encodeURIComponent(id), '_blank');
+}
+
 function openAutoModal() {
   document.getElementById('auto-theme').value = '';
   document.getElementById('auto-email').value = '';
@@ -1618,15 +1702,77 @@ function pollJob(jobId, panelId, onComplete) {
   }, 2000);
 }
 
+// ===== 落地页 / 工作区 视图切换 =====
+function showLanding(){
+  const l=document.getElementById('landing');
+  const w=document.getElementById('workspace');
+  if(l) l.classList.remove('hidden');
+  if(w) w.classList.add('hidden');
+  loadRecentProjects();
+}
+function showWorkspace(){
+  const l=document.getElementById('landing');
+  const w=document.getElementById('workspace');
+  if(l) l.classList.add('hidden');
+  if(w) w.classList.remove('hidden');
+}
+// 进入工作区：若已有项目则直接切换 tab，否则加载首个项目或引导新建
+function enterWorkspace(tab){
+  showWorkspace();
+  if(currentProject){ if(tab!=null) switchTab(tab); return; }
+  api('/api/projects').then(d=>{
+    const ps=d.projects||[];
+    if(ps.length){ loadProject(ps[0].id); if(tab!=null) switchTab(tab); }
+    else openNewProjectModal();
+  }).catch(()=>openNewProjectModal());
+}
+// 进入剪辑器（携带当前项目）
+function enterEditor(){
+  const p=currentProject || (new URLSearchParams(location.search).get('project')) || '';
+  location.href='/editor.html'+(p?'?project='+encodeURIComponent(p):'');
+}
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function loadRecentProjects(){
+  const box=document.getElementById('landing-recent');
+  if(!box) return;
+  api('/api/projects').then(data=>{
+    const ps=(data.projects||[]).slice(0,6);
+    if(!ps.length){
+      box.innerHTML='<div class="landing-recent-empty">还没有项目，点击「🚀 创建新漫剧」开始吧</div>';
+      return;
+    }
+    box.innerHTML=ps.map(p=>'<div class="landing-recent-item" onclick="loadProject(\''+esc(p.id)+'\')">'+
+      '<div class="lri-ic">🎬</div><div class="lri-info">'+
+      '<div class="lri-name">'+esc(p.name||p.id)+'</div>'+
+      '<div class="lri-sub">'+esc(p.updated_at||'')+'</div></div>'+
+      '<div class="lri-go">→</div></div>').join('');
+  }).catch(()=>{ box.innerHTML='<div class="landing-recent-empty">项目加载失败</div>'; });
+}
+
 // ===== Init =====
+function handleHash(){
+  const h=location.hash.replace('#','');
+  if(h==='tab0'||h==='tab1'||h==='tab2') enterWorkspace(+h.slice(3));
+  else if(h==='auto') openAutoModal();
+  else if(h==='projects') openProjectsModal();
+  else if(h==='settings') openSettingsModal();
+}
 document.addEventListener('DOMContentLoaded', () => {
   onScriptParamChange();
+  const wantP=new URLSearchParams(location.search).get('project');
   api('/api/projects').then(data => {
-    if (data.projects && data.projects.length > 0) {
-      loadProject(data.projects[0].id);
-    }
-  }).catch(() => {});
+    const ps=data.projects||[];
+    const h=location.hash.replace('#','');
+    const hasHash=h==='tab0'||h==='tab1'||h==='tab2'||h==='auto'||h==='projects'||h==='settings';
+    if(wantP && ps.some(p=>p.id===wantP)){ loadProject(wantP); if(hasHash) handleHash(); }
+    else if(hasHash){ enterWorkspace(); handleHash(); }
+    else showLanding();
+  }).catch(() => { showLanding(); });
 });
 </script>
+<!-- 统一左侧菜单栏组件（所有页面共用） -->
+<script src="/sidebar.js"></script>
 </body>
 </html>

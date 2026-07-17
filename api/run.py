@@ -717,8 +717,12 @@ def get_audio_duration(path: pathlib.Path) -> float:
         return 2.0  # fallback
 
 
-def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5):
-    """从剧本生成 SRT 字幕。"""
+def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5,
+                 tts_manifest: dict | None = None):
+    """从剧本生成 SRT 字幕。
+
+    tts_manifest: 真实配音清单，传入时让字幕起止对齐对应配音（声音-文字同步）。
+    """
     lines = []
     idx = 1
     current_time = 0.0
@@ -730,36 +734,36 @@ def generate_srt(script: dict, out_path: pathlib.Path, scene_duration: int = 5):
             current_time += sd
             continue
 
-        # 对白均匀分布在镜头时间中
-        per_dialogue = sd / max(len(dialogues), 1)
-
-        for d in dialogues:
-            char_name = d.get("character", "")
+        sid = scene["id"]
+        n = len(dialogues)
+        per_dialogue = sd / max(n, 1)
+        # 优先用真实 TTS 时长对齐；否则按场景时长平均切分
+        for i, d in enumerate(dialogues):
             text = d.get("text", "")
-            # 查找角色名
-            for c in script.get("characters", []):
-                if c["id"] == char_name:
-                    char_name = c["name"]
-                    break
-
-            start = current_time
-            end = current_time + per_dialogue
+            key = f"{sid}_{i}"
+            info = (tts_manifest or {}).get(key)
+            if info and info.get("tts_duration"):
+                start = float(info.get("start", current_time + i * per_dialogue))
+                end = start + float(info["tts_duration"])
+            else:
+                start = current_time + i * per_dialogue
+                end = start + per_dialogue
+                current_time = end
 
             start_srt = format_srt_time(start)
             end_srt = format_srt_time(end)
 
             lines.append(f"{idx}")
             lines.append(f"{start_srt} --> {end_srt}")
-            lines.append(f"{char_name}：{text}")
+            # 字幕只显示台词本身，不带角色名与冒号
+            lines.append(f"{text}")
             lines.append("")
 
             idx += 1
-            current_time = end
 
-        # 如果还有剩余时间
-        remaining = sd - (current_time - (start - per_dialogue * (len(dialogues) - 1)))
-        if remaining > 0:
-            current_time += remaining
+        if not tts_manifest:
+            # 平均切分时推进整段场景时间
+            current_time = (current_time - per_dialogue * n) + sd
 
     out_path.write_text("\n".join(lines), encoding="utf-8")
 

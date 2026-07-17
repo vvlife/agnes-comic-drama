@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎞️ 多轨剪辑器</title>
+<style>
+:root{
+  --bg:#0c0d12; --panel:#14151c; --panel2:#1b1d27; --panel3:#242736;
+  --border:#2c2f3d; --text:#e9eaf2; --text2:#8b8fa3; --text3:#565a70;
+  --accent:#7c6cff; --accent2:#a99bff; --ok:#2ecc8f; --err:#ff6b6b;
+  --a1:#e0844a; --a2:#2ecc8f; --a3:#c061ff;
+  --glow:rgba(124,108,255,.28);
+  --sbw:214px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'SF Pro','Helvetica Neue',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;
+  padding-left:var(--sbw);transition:padding-left .18s}
+body.nav-collapsed{padding-left:66px}
+a{color:var(--accent2);text-decoration:none}
+button{cursor:pointer;border:none;border-radius:7px;font-size:13px;font-family:inherit;transition:.15s}
+button:disabled{opacity:.4;cursor:not-allowed}
+input[type=number],select{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:13px;outline:none}
+input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--glow)}
+.app{max-width:1280px;margin:0 auto;padding:18px}
+header{display:flex;align-items:center;gap:12px;padding:6px 0 14px}
+header h1{font-size:20px;font-weight:700;background:linear-gradient(135deg,var(--accent2),var(--accent));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+header .spacer{flex:1}
+.btn-primary{background:var(--accent);color:#fff;padding:9px 18px;font-weight:600}
+.btn-primary:hover{background:var(--accent2)}
+.btn-ghost{background:var(--panel2);color:var(--text);padding:7px 13px;border:1px solid var(--border)}
+.btn-ghost:hover{background:var(--panel3)}
+
+.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:10px 14px;margin-bottom:12px;position:sticky;top:6px;z-index:40}
+.toolbar .grow{flex:1}
+.toolbar label{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)}
+.zoom{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
+.zoom input[type=range]{width:120px;accent-color:var(--accent)}
+
+.tl-scroll{overflow-x:auto;overflow-y:hidden;background:var(--panel);border:1px solid var(--border);border-radius:12px}
+.tl-inner{position:relative}
+.ruler{position:relative;height:26px;background:var(--panel2);border-bottom:1px solid var(--border);margin-left:var(--hw);}
+.ruler .tick{position:absolute;top:0;height:100%;border-left:1px solid var(--border);font-size:10px;color:var(--text3);padding-left:3px;line-height:26px}
+.ruler .tick.major{border-left-color:#3a3e50;color:var(--text2)}
+.track{display:flex;height:84px;border-bottom:1px solid var(--border)}
+.track:last-child{border-bottom:none}
+.track-head{width:var(--hw);min-width:var(--hw);flex-shrink:0;position:sticky;left:0;z-index:10;
+  background:var(--panel2);border-right:1px solid var(--border);padding:8px 10px;display:flex;flex-direction:column;gap:5px;justify-content:center}
+.track-head .nm{font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px}
+.track-head .ctl{display:flex;align-items:center;gap:6px}
+.track-head .ctl button{width:24px;height:22px;background:var(--panel3);color:var(--text2);font-size:11px;font-weight:700}
+.track-head .ctl button.on{background:var(--err);color:#fff}
+.track-head .ctl button.solo.on{background:var(--a3);color:#fff}
+.track-head .ctl input[type=range]{flex:1;accent-color:var(--accent);min-width:0}
+.track-head .vol{font-size:9px;color:var(--text3);width:26px;text-align:right}
+.track-head .up{font-size:10px;padding:3px 6px;background:var(--panel3);color:var(--accent2);width:100%}
+.track-body{position:relative;display:flex;align-items:stretch;height:100%;padding:6px 0}
+.clip{position:relative;flex-shrink:0;margin:0 1px;height:100%;border-radius:6px;overflow:hidden;cursor:pointer;
+  background:#0a0b11;border:2px solid transparent;transition:border-color .12s}
+.clip:hover{border-color:var(--accent2)}
+.clip.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--glow)}
+.clip.disabled{opacity:.45;filter:grayscale(.6)}
+.clip .ghost{position:absolute;inset:0;opacity:.32}
+.clip .ghost img{width:100%;height:100%;object-fit:cover;opacity:.55}
+.clip .full{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;opacity:.82}
+.crop-win{position:absolute;top:0;bottom:0;overflow:hidden}
+.clip .crop-win{background:#000;border-left:2px solid var(--accent);border-right:2px solid var(--accent);box-shadow:0 0 0 1px rgba(0,0,0,.5)}
+.crop-win img{height:100%;object-fit:cover;display:block}
+.clip .lbl{position:relative;z-index:3;font-size:10px;font-weight:700;color:#fff;text-shadow:0 1px 3px #000;padding:3px 5px;background:linear-gradient(transparent,rgba(0,0,0,.55));width:100%;display:flex;justify-content:space-between}
+.clip .dur{position:absolute;top:3px;left:4px;z-index:3;font-size:9px;color:#fff;background:rgba(0,0,0,.5);padding:1px 4px;border-radius:4px}
+.audio-clip{position:relative;flex-shrink:0;margin:0 1px;height:100%;border-radius:5px;overflow:hidden;cursor:pointer;
+  background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.05) 0 2px,transparent 2px 5px);
+  border:1px solid rgba(255,255,255,.12)}
+.audio-clip:hover{border-color:var(--accent2)}
+.audio-clip.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--glow)}
+.audio-clip.disabled{opacity:.45}
+.audio-clip .crop-win{background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.30) 0 2px,transparent 2px 5px);border-left:2px solid var(--accent);border-right:2px solid var(--accent);box-shadow:0 0 0 1px rgba(0,0,0,.4)}
+.audio-clip .cap{position:absolute;left:6px;top:5px;font-size:9px;color:#fff;font-weight:700;text-shadow:0 1px 2px #000;white-space:nowrap;z-index:3}
+.audio-clip .wf{position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none}
+.trim{position:absolute;top:0;bottom:0;width:14px;cursor:ew-resize;z-index:6;opacity:.5;transition:opacity .12s,background .12s}
+.trim.l{left:-1px}
+.trim.r{right:-1px}
+.trim::before,.trim::after{content:'';position:absolute;top:8px;bottom:8px;width:2px;background:var(--accent2);box-shadow:0 0 0 1px rgba(0,0,0,.45)}
+.trim::before{left:5px}
+.trim::after{left:9px}
+.trim:hover{opacity:1;background:var(--glow)}
+.track.v1 .track-head{background:#16203a}
+.track.a1 .track-head{background:#2a1d14}
+.track.a2 .track-head{background:#10271e}
+.track.a3 .track-head{background:#231433}
+.track.sub .track-head{background:#2a2410}
+.sub-clip{position:relative;flex-shrink:0;margin:0 1px;height:100%;border-radius:5px;overflow:hidden;cursor:pointer;
+  background-image:repeating-linear-gradient(90deg,rgba(224,193,74,.07) 0 2px,transparent 2px 5px);
+  border:1px solid rgba(224,193,74,.20)}
+.sub-clip:hover{border-color:#e0c14a}
+.sub-clip.disabled{opacity:.4}
+.sub-clip.spacer{border-style:dashed;border-color:rgba(224,193,74,.14);background:none;cursor:default}
+.sub-clip .sub-win{position:absolute;top:0;bottom:0;overflow:hidden;background:rgba(224,193,74,.16);border-left:2px solid #e0c14a;border-right:2px solid #e0c14a}
+.sub-clip .sub-txt{position:absolute;left:6px;top:5px;right:4px;font-size:9px;color:#fff;font-weight:700;text-shadow:0 1px 2px #000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.inspector{display:none;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:12px;gap:16px;display:flex}
+.inspector.show{display:flex}
+.insp-vid{width:200px;flex-shrink:0}
+.insp-vid video{width:100%;border-radius:8px;background:#000}
+.insp-main{flex:1;min-width:0}
+.insp-main h3{font-size:15px;margin-bottom:4px}
+.insp-meta{color:var(--text2);font-size:12px;margin-bottom:6px}
+.insp-dlg{color:var(--accent2);font-size:12px;margin-bottom:5px}
+.insp-blk{color:var(--text3);font-size:11px;font-style:italic;margin-bottom:10px}
+.insp-ctrls{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
+.f{display:flex;flex-direction:column;gap:3px}
+.f label{font-size:10px;color:var(--text2)}
+.f input{width:90px}
+.insp-enable{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2)}
+
+.job{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(440px,90vw);z-index:70;
+  background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:18px 18px 16px;
+  box-shadow:0 18px 60px rgba(0,0,0,.6);display:none}
+.job::before{content:'';position:fixed;inset:0;left:0;top:0;background:rgba(0,0,0,.5);z-index:-1}
+.job .jhead{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.job .spinner{width:18px;height:18px;border:3px solid var(--panel3);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0}
+.job .jtitle{font-weight:700;font-size:15px;flex:1}
+.job .jclose{margin-left:auto;background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;line-height:1;padding:0 4px}
+.job .jclose:hover{color:var(--text)}
+.job .logs{background:#000;border-radius:8px;padding:10px;max-height:200px;overflow:auto;font-family:monospace;font-size:12px;color:var(--text2);margin-top:8px;white-space:pre-wrap}
+.result{margin-top:14px;display:none}
+.result video{width:100%;max-height:480px;border-radius:10px;background:#000}
+.result .row{margin-top:8px;display:flex;gap:10px}
+.empty{text-align:center;padding:60px 20px;color:var(--text2)}
+.hint{font-size:11px;color:var(--text3);margin-top:6px}
+
+/* ---- 加载中缓冲遮罩 ---- */
+.loading{position:fixed;inset:0;left:var(--sbw);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:var(--bg);z-index:80;transition:opacity .35s}
+body.nav-collapsed .loading{left:66px}
+.loading.hide{opacity:0;pointer-events:none}
+.spinner{width:46px;height:46px;border:4px solid var(--panel3);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading .txt{color:var(--text2);font-size:14px;letter-spacing:.5px}
+.loading .sub{color:var(--text3);font-size:12px}
+
+.preview{display:none;gap:16px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;position:sticky;top:64px;z-index:35;align-items:flex-start}
+.preview.show{display:flex}
+.pv-video{width:340px;max-height:210px;background:#000;border-radius:8px;flex-shrink:0;display:block}
+.pv-right{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px}
+.pv-title{font-size:14px;font-weight:700;display:flex;align-items:center;gap:8px}
+.pv-title .tag{font-size:10px;color:var(--text3);font-weight:500}
+.pv-transport{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pv-time{font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums}
+.pv-time b{color:var(--text)}
+.playhead{position:absolute;top:0;bottom:0;width:2px;background:var(--err);box-shadow:0 0 6px var(--err);z-index:20;pointer-events:none;display:none}
+.playhead::after{content:'';position:absolute;top:0;left:-5px;border:6px solid transparent;border-top-color:var(--err);border-bottom-color:var(--err)}
+.pv-vwrap{position:relative;width:340px;flex-shrink:0}
+.pv-vwrap video{max-height:210px}
+.pv-cap{position:absolute;left:0;right:0;bottom:8px;display:flex;flex-direction:column;align-items:center;gap:3px;padding:0 10px;pointer-events:none}
+.pv-cap span{background:rgba(0,0,0,.62);color:#fff;font-size:13px;line-height:1.45;padding:3px 9px;border-radius:7px;text-shadow:0 1px 2px #000;max-width:100%;text-align:center}
+
+/* ---- AI 剪辑助手浮窗 ---- */
+.ai-fab{position:fixed;right:22px;bottom:22px;width:54px;height:54px;border-radius:50%;border:1px solid var(--border);
+  background:linear-gradient(135deg,#7c5cff,#22c5eb);color:#fff;font-size:24px;cursor:pointer;z-index:60;
+  box-shadow:0 8px 26px rgba(124,92,255,.45);display:flex;align-items:center;justify-content:center;transition:transform .15s}
+.ai-fab:hover{transform:scale(1.08)}
+.ai-panel{position:fixed;right:22px;bottom:88px;width:340px;max-height:68vh;background:var(--panel);border:1px solid var(--border);
+  border-radius:14px;z-index:60;display:none;flex-direction:column;overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.5)}
+.ai-panel.open{display:flex}
+.ai-head{display:flex;align-items:center;justify-content:space-between;padding:11px 14px;font-weight:700;
+  background:linear-gradient(135deg,rgba(124,92,255,.22),rgba(34,197,235,.18));border-bottom:1px solid var(--border)}
+.ai-x{background:none;border:none;color:var(--text2);font-size:20px;cursor:pointer;line-height:1}
+.ai-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:9px;font-size:13px}
+.ai-msg{padding:8px 11px;border-radius:10px;max-width:88%;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.ai-msg.bot{background:rgba(255,255,255,.07);color:var(--text);align-self:flex-start}
+.ai-msg.me{background:linear-gradient(135deg,#7c5cff,#22c5eb);color:#fff;align-self:flex-end}
+.ai-msg.err{background:rgba(255,90,90,.16);color:#ffb4b4;align-self:flex-start}
+.ai-suggest{display:flex;flex-wrap:wrap;gap:6px;padding:0 12px 8px}
+.ai-suggest button{font-size:11px;padding:4px 8px;border-radius:20px;border:1px solid var(--border);
+  background:rgba(255,255,255,.05);color:var(--text2);cursor:pointer}
+.ai-suggest button:hover{color:#fff;border-color:var(--accent)}
+.ai-input{display:flex;gap:8px;padding:10px 12px;border-top:1px solid var(--border)}
+.ai-input input{flex:1;background:rgba(255,255,255,.06);border:1px solid var(--border);border-radius:8px;color:var(--text);
+  padding:8px 10px;font-size:13px;outline:none}
+.ai-input input:focus{border-color:var(--accent)}
+.ai-input button{background:linear-gradient(135deg,#7c5cff,#22c5eb);color:#fff;border:none;border-radius:8px;padding:0 14px;cursor:pointer;font-weight:600}
+
+/* 左侧菜单栏样式由共享组件 /sidebar.css 提供 */
+</style>
+<link rel="stylesheet" href="/sidebar.css">
+</head>
+<body>
+<!-- 左侧菜单栏由共享组件 /sidebar.js 注入 -->
+
+<!-- 加载中缓冲遮罩 -->
+<div id="loading" class="loading">
+  <div class="spinner"></div>
+  <div class="txt">剪辑器加载中，请稍候…</div>
+  <div class="sub">正在拉取场景、音轨与波形素材</div>
+</div>
+
+<div class="app">
+  <header>
+    <h1>🎞️ 多轨剪辑器</h1>
+  </header>
+
+  <div id="toolbar" class="toolbar" style="display:none">
+    <div class="zoom">
+      缩放
+      <input type="range" id="zoom" min="10" max="55" value="26" oninput="setZoom(this.value)">
+      <span id="zoomVal">26</span> px/s
+    </div>
+    <div class="grow"></div>
+    <button class="btn-ghost" onclick="resetAll()">↺ 重置</button>
+    <button class="btn-primary" id="exportBtn" onclick="exportEdit()">🎬 导出</button>
+  </div>
+
+  <div id="preview" class="preview">
+    <div class="pv-vwrap">
+      <video id="pvVideo" class="pv-video" controls preload="metadata"></video>
+      <div class="pv-cap" id="pvCap"></div>
+    </div>
+    <div class="pv-right">
+      <div class="pv-title">📺 预览监视器 <span class="tag">实时预览当前剪辑（无需导出）</span></div>
+      <div class="pv-transport">
+        <button class="btn-ghost" id="pvPlay" onclick="playPreview()">▶ 预览整片</button>
+        <button class="btn-ghost" onclick="stopPreview(true)">⏹ 停止</button>
+        <span class="pv-time">已播 <b id="pvTime">0.0</b>s / 共 <b id="pvTotal">0.0</b>s</span>
+      </div>
+      <div class="hint">▶ 按当前顺序、裁剪、静音/独奏实时连放整条影片；时间轴上红色播放头会同步移动。点时间轴刻度可定位到该时刻。</div>
+    </div>
+  </div>
+
+  <div id="timeline" class="tl-scroll" style="display:none">
+    <div class="tl-inner" id="tlInner"></div>
+  </div>
+
+  <div id="inspector" class="inspector">
+    <div class="insp-vid"><video id="inspVideo" controls preload="metadata"></video></div>
+    <div class="insp-main">
+      <h3 id="inspTitle"></h3>
+      <div class="insp-meta" id="inspMeta"></div>
+      <div class="insp-dlg" id="inspDlg"></div>
+      <div class="insp-blk" id="inspBlk"></div>
+      <div class="insp-ctrls">
+        <label class="insp-enable"><input type="checkbox" id="inspEn" onchange="toggleSel(this.checked)"> 启用此片段</label>
+        <div class="f"><label>入点(秒)</label><input type="number" step="0.1" id="inspIn" onchange="setSelIn(this.value)"></div>
+        <div class="f"><label>出点(秒)</label><input type="number" step="0.1" id="inspOut" onchange="setSelOut(this.value)"></div>
+        <div class="f"><label>片段时长</label><input id="inspDur" disabled></div>
+      </div>
+      <div class="hint">每条轨道的每个镜头片段都可独立裁剪：把鼠标移到片段左右边缘（出现蓝色竖条），按住拖动即可裁剪；也可在此精确填入/出点。配音/场景音按镜头对齐，音乐为整轨裁剪。</div>
+    </div>
+  </div>
+
+  <div id="job" class="job">
+    <div class="jhead">
+      <div class="spinner"></div>
+      <div class="jtitle" id="jobStatus">执行中...</div>
+      <button class="jclose" onclick="closeJob()" title="关闭">×</button>
+    </div>
+    <div class="logs" id="jobLogs"></div>
+  </div>
+
+  <div id="empty" class="empty">
+    <div style="font-size:40px;margin-bottom:10px">🎞️</div>
+    <p>请先在生成器里创建一个项目并生成视频，再到此剪辑。</p>
+    <button class="btn-primary" onclick="location.href='/'">打开生成器</button>
+  </div>
+</div>
+
+<button id="aiFab" class="ai-fab" onclick="aiToggle()" title="AI 剪辑助手">🤖</button>
+<div id="aiPanel" class="ai-panel">
+  <div class="ai-head">🤖 AI 剪辑助手 <button class="ai-x" onclick="aiToggle()">×</button></div>
+  <div id="aiMsgs" class="ai-msgs"></div>
+  <div class="ai-suggest">
+    <button onclick="aiQuick(this)">把第2段视频缩短到3秒</button>
+    <button onclick="aiQuick(this)">静音场景音</button>
+    <button onclick="aiQuick(this)">调换第1和第2段</button>
+    <button onclick="aiQuick(this)">隐藏所有字幕</button>
+    <button onclick="aiQuick(this)">重置全部</button>
+  </div>
+  <div class="ai-input">
+    <input id="aiText" placeholder="例如：把第2段配音剪掉开头的1秒" onkeydown="if(event.key==='Enter')aiSend()">
+    <button onclick="aiSend()">发送</button>
+  </div>
+</div>
+
+<script>
+const API='';
+const HW=170;
+let pid=null, origScenes=[], order=[], tracksCfg=null, solo=new Set();
+let charMap={};  // 角色 id -> 名称，字幕/标签只显示角色名，不显示 C1/C2 一类 id
+let vState={}, tState={}, aState={}, sState={}, mState={enabled:false,in:0,out:0};
+let sel=null, pps=26;
+let pv={playing:false,segs:[],subSegs:[],idx:0,curT:0,raf:0,total:0};
+let subAll=true, subOff=new Set();
+
+function qs(n){return new URLSearchParams(location.search).get(n);}
+async function api(path,opts={}){
+  const res=await fetch(API+path,{headers:{'Content-Type':'application/json',...(opts.headers||{})},method:opts.method||'GET',body:opts.body?JSON.stringify(opts.body):undefined});
+  if(!res.ok){const e=await res.json().catch(()=>({error:res.statusText}));throw new Error(e.error||res.statusText);}
+  return res.json();
+}
+const r2=v=>Math.max(0,+v.toFixed(3));
+const defaultClip=()=>({in:0,out:5,enabled:true});
+
+function hideLoading(){const el=document.getElementById('loading');if(el){el.classList.add('hide');setTimeout(()=>{el.style.display='none';},400);}}
+async function init(){
+  const p=qs('project');
+  if(p) return selectProject(p);
+  hideLoading();
+  document.getElementById('empty').style.display='none';
+  alert('请通过生成器打开剪辑器（带 ?project= 参数）。');
+}
+async function selectProject(id){
+  pid=id;
+  window.__PROJECT_ID__=id;
+  document.getElementById('empty').style.display='none';
+  try{
+    const data=await api(`/api/projects/${pid}/edit/scenes`);
+    origScenes=data.scenes;
+    // 角色 id -> 名称 映射（字幕/标签只显示角色名，不显示 C1/C2 一类 id）
+    charMap={};
+    (data.characters||[]).forEach(c=>{ if(c&&c.id) charMap[c.id]=c.name||c.id; });
+    order=data.scenes.map(s=>s.sid);
+    vState={};tState={};aState={};sState={};
+    data.scenes.forEach(s=>{
+      const d=s.duration||5;
+      vState[s.sid]={in:0,out:d,enabled:true};
+      tState[s.sid]={in:0,out:d,enabled:true};
+      aState[s.sid]={in:0,out:d,enabled:true};
+      sState[s.sid]={in:0,out:d,enabled:true};
+    });
+    tracksCfg=data.audio_tracks||null;
+    mState={enabled:!!(tracksCfg&&tracksCfg.music&&tracksCfg.music.enabled), in:0, out:0};
+    document.getElementById('toolbar').style.display='flex';
+    document.getElementById('timeline').style.display='block';
+    document.getElementById('preview').classList.add('show');
+    pv.segs=[];pv.idx=0;pv.curT=0;
+    subAll=true;subOff=new Set();
+    renderTimeline();
+    bindPreviewVideo();
+    primePreview();
+  }catch(e){alert('加载场景失败：'+e.message);}
+  finally{hideLoading();}
+}
+
+function effEnabled(key){ if(solo.size) return solo.has(key); const t=tracksCfg&&tracksCfg[key]; return t?!!t.enabled:false; }
+function totalDur(){return order.reduce((a,sid)=>a+Math.max(0,(vState[sid].out-vState[sid].in)),0);}
+
+function totalOrig(){return order.reduce((a,sid)=>a+((origScenes.find(x=>x.sid===sid)||{}).duration||5),0);}
+
+// ---- 音频波形 ----
+const _wfPeaks=new Map();   // url -> {peaks,dur} | null
+let _wfAC=null;
+async function _loadPeaks(url){
+  if(_wfPeaks.has(url))return _wfPeaks.get(url);
+  _wfPeaks.set(url,null);   // 占位防重复请求
+  try{
+    const r=await fetch(url);if(!r.ok)return null;
+    const ab=await r.arrayBuffer();
+    _wfAC=_wfAC||new (window.AudioContext||window.webkitAudioContext)();
+    const buf=await _wfAC.decodeAudioData(ab);
+    const ch=buf.getChannelData(0);
+    const N=400,blk=Math.max(1,Math.floor(ch.length/N));
+    const peaks=new Array(N);
+    for(let i=0;i<N;i++){let mn=1,mx=-1;const s=i*blk;for(let j=0;j<blk;j++){const v=ch[s+j]||0;if(v<mn)mn=v;if(v>mx)mx=v;}peaks[i]={mn,mx};}
+    const o={peaks,dur:buf.duration};_wfPeaks.set(url,o);return o;
+  }catch(e){return null;}
+}
+async function _clipPeaks(cv){
+  const kind=cv.dataset.kind;
+  if(cv.dataset.url)return _loadPeaks(cv.dataset.url);          // 音乐：直接用 url
+  if(kind==='amb')return _loadPeaks(`${API}/api/project-files/${pid}/sfx/${cv.dataset.sid}_amb.mp3`);
+  // 配音：探测 edit_audio/tts_{sid}_NN.mp3（一段可能有多条对白）
+  const urls=[];for(let i=0;i<5;i++)urls.push(`${API}/api/project-files/${pid}/edit_audio/tts_${cv.dataset.sid}_${String(i).padStart(2,'0')}.mp3`);
+  const res=await Promise.all(urls.map(_loadPeaks));
+  const parts=res.filter(Boolean);if(!parts.length)return null;
+  let peaks=[],dur=0;parts.forEach(p=>{peaks=peaks.concat(p.peaks);dur+=p.dur;});
+  return {peaks,dur};
+}
+async function drawWaveforms(){
+  const cvs=document.querySelectorAll('.audio-clip .wf');
+  for(const cv of cvs){
+    const w=cv.clientWidth,h=cv.clientHeight;if(!w||!h)continue;
+    const dpr=window.devicePixelRatio||1;
+    if(cv.width!==Math.round(w*dpr))cv.width=Math.round(w*dpr);
+    if(cv.height!==Math.round(h*dpr))cv.height=Math.round(h*dpr);
+    const ctx=cv.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+    const data=await _clipPeaks(cv);if(!data)continue;
+    const od=parseFloat(cv.dataset.od)||1,inT=parseFloat(cv.dataset.in)||0,outT=parseFloat(cv.dataset.out)||od;
+    const L=data.peaks.length;
+    let a=Math.floor(inT/od*L),b=Math.ceil(outT/od*L);
+    a=Math.max(0,Math.min(L,a));b=Math.max(a+1,Math.min(L,b));
+    const slice=data.peaks.slice(a,b);
+    const mid=h/2,n=slice.length,bw=w/n,kind=cv.dataset.kind;
+    ctx.fillStyle=kind==='amb'?'rgba(34,197,235,.8)':kind==='music'?'rgba(74,222,128,.8)':'rgba(167,139,250,.85)';
+    for(let i=0;i<n;i++){const p=slice[i];const y1=mid-p.mx*mid*0.96,y2=mid-p.mn*mid*0.96;ctx.fillRect(i*bw,y1,Math.max(1,bw-0.3),Math.max(0.6,y2-y1));}
+  }
+}
+
+function renderTimeline(){
+  document.documentElement.style.setProperty('--hw',HW+'px');
+  const inner=document.getElementById('tlInner');
+  const odOf=sid=>(origScenes.find(x=>x.sid===sid)||{}).duration||5;
+  const segDurOf=(e,sid)=>Math.max(0,(e.out>0?e.out:odOf(sid))-e.in);
+  let total=Math.max(totalDur(),1);
+  if(tracksCfg&&tracksCfg.tts&&tracksCfg.tts.available) total=Math.max(total,order.reduce((a,sid)=>a+segDurOf(tState[sid],sid),0));
+  if(tracksCfg&&tracksCfg.ambient&&tracksCfg.ambient.available) total=Math.max(total,order.reduce((a,sid)=>a+segDurOf(aState[sid],sid),0));
+  total=Math.max(total,order.reduce((a,sid)=>a+segDurOf(sState[sid],sid),0));
+  const bodyW=Math.ceil(total*pps)+40;
+  inner.style.width=(HW+bodyW)+'px';
+
+  let html='';
+  html+=`<div class="ruler" style="width:${bodyW}px" onclick="scrub(event)">`;
+  for(let s=0;s<=total;s+=1){const major=(s%5===0);html+=`<div class="tick ${major?'major':''}" style="left:${s*pps}px">${major?s+'s':''}</div>`;}
+  html+=`</div>`;
+
+  // V1 视频轨
+  html+=`<div class="track v1"><div class="track-head"><div class="nm">🎬 V1 · 视频</div><div class="hint">拖拽排序</div></div><div class="track-body">`;
+  order.forEach((sid,i)=>{
+    const s=origScenes.find(x=>x.sid===sid)||{};
+    const e=vState[sid];
+    const w=Math.max(4,(e.out-e.in)*pps);
+    const dlg=(s.dialogue||[]).map(d=>(charMap[d.character]||d.character)).filter(Boolean).join('/');
+    const selc=(sel&&sel.track==='video'&&sel.sid===sid)?'sel':'';
+    html+=`<div class="clip ${e.enabled?'':'disabled'} ${selc}" style="width:${w}px" draggable="true" data-i="${i}"
+      ondragstart="dStart(event)" ondragover="dOver(event)" ondrop="dDrop(event)" ondragend="dEnd(event)" onclick="selClip('video','${sid}')">
+      ${s.thumb_url?`<img class="full" src="${API}${s.thumb_url}" loading="lazy" draggable="false">`:''}
+      <div class="dur">${(e.out-e.in).toFixed(1)}s</div>
+      <div class="lbl"><span>#${i+1}</span><span>${dlg?'💬':''}</span></div>
+      <div class="trim l" title="拖拽裁剪入点" onmousedown="startTrim(event,'video','${sid}','l')"></div>
+      <div class="trim r" title="拖拽裁剪出点" onmousedown="startTrim(event,'video','${sid}','r')"></div>
+    </div>`;
+  });
+  html+=`</div></div>`;
+
+  // 音频轨
+  const defs=[{key:'tts',cls:'a1',cap:'🎙'},{key:'ambient',cls:'a2',cap:'🌊'}];
+  defs.forEach(({key,cls,cap})=>{
+    const t=tracksCfg?tracksCfg[key]:null;const label=t?t.label:key;const avail=t?t.available:false;
+    const en=effEnabled(key);const vol=t?t.volume:0.5;const soloOn=solo.has(key);
+    html+=`<div class="track ${cls}"><div class="track-head"><div class="nm">${label}</div><div class="ctl">`;
+    if(avail){
+      html+=`<button class="${en?'on':''}" title="静音" onclick="toggleMute('${key}')">M</button>`;
+      html+=`<button class="solo ${soloOn?'on':''}" title="独奏" onclick="toggleSolo('${key}')">S</button>`;
+      html+=`<input type="range" min="0" max="1.5" step="0.05" value="${vol}" oninput="setVol('${key}',this.value)" title="音量">`;
+      html+=`<span class="vol" id="vol_${key}">${Math.round(vol*100)}</span>`;
+    }else{html+=`<span class="hint">无素材</span>`;}
+    html+=`</div></div><div class="track-body">`;
+    if(avail){
+      order.forEach(sid=>{
+        const st=key==='tts'?tState[sid]:aState[sid];
+        const od=(origScenes.find(x=>x.sid===sid)||{}).duration||5;
+        const w=Math.max(4,(st.out-st.in)*pps);
+        const on=en&&st.enabled;
+        const selc=(sel&&sel.track===key&&sel.sid===sid)?'sel':'';
+        html+=`<div class="audio-clip ${on?'':'disabled'} ${selc}" style="width:${w}px" onclick="selClip('${key}','${sid}')">
+          <canvas class="wf" data-kind="${key}" data-sid="${sid}" data-od="${od}" data-in="${st.in}" data-out="${st.out>0?st.out:od}"></canvas>
+          <span class="cap">${cap}</span>
+          <div class="trim l" title="拖拽裁剪入点" onmousedown="startTrim(event,'${key}','${sid}','l')"></div>
+          <div class="trim r" title="拖拽裁剪出点" onmousedown="startTrim(event,'${key}','${sid}','r')"></div>
+        </div>`;
+      });
+    }
+    html+=`</div></div>`;
+  });
+
+  // 音乐轨
+  const mt=tracksCfg?tracksCfg.music:null;
+  const mAvail=mt?mt.available:false;const mEn=effEnabled('music');
+  html+=`<div class="track a3"><div class="track-head"><div class="nm">🎵 音乐</div><div class="ctl">`;
+  if(mAvail){
+    html+=`<button class="${mEn?'on':''}" title="静音" onclick="toggleMute('music')">M</button>`;
+    html+=`<button class="solo ${solo.has('music')?'on':''}" title="独奏" onclick="toggleSolo('music')">S</button>`;
+    html+=`<input type="range" min="0" max="1.5" step="0.05" value="${mt.volume}" oninput="setVol('music',this.value)" title="音量">`;
+    html+=`<span class="vol" id="vol_music">${Math.round(mt.volume*100)}</span>`;
+  }else{
+    html+=`<button class="up" onclick="uploadMusic()">＋ 上传音乐</button>`;
+  }
+  html+=`</div></div><div class="track-body">`;
+  if(mAvail){
+    const mTot=totalDur();
+    const mIn=mState.in;
+    const mOut=mState.out>0?mState.out:mTot;
+    const mLen=Math.max(2,mOut-mIn);
+    const w=Math.max(8,mLen*pps);
+    html+=`<div class="audio-clip ${mState.enabled&&mEn?'':'disabled'} ${sel&&sel.track==='music'?'sel':''}" style="width:${w}px;margin-left:${mIn*pps}px" onclick="selClip('music',null)">
+      <canvas class="wf" data-kind="music" data-url="${API}${mt.url}" data-od="${mTot}" data-in="${mIn}" data-out="${mOut}"></canvas>
+      <span class="cap">♪ ${mt.filename||'音乐'}</span>
+      <div class="trim l" title="拖拽裁剪入点" onmousedown="startTrim(event,'music',null,'l')"></div>
+      <div class="trim r" title="拖拽裁剪出点" onmousedown="startTrim(event,'music',null,'r')"></div>
+    </div>`;
+  }
+  html+=`</div></div>`;
+
+  // 字幕轨（与视频轨逐镜对齐：遍历全部镜头，无对白处留占位）
+  const hasSub=order.some(sid=>((origScenes.find(x=>x.sid===sid)||{}).dialogue||[]).length);
+  html+=`<div class="track sub"><div class="track-head"><div class="nm">🗨 字幕</div><div class="ctl"><button class="${subAll?'on':''}" title="全部字幕显隐" onclick="toggleSubAll()">CC</button></div></div><div class="track-body">`;
+  if(hasSub){
+    order.forEach(sid=>{
+      const s=origScenes.find(x=>x.sid===sid)||{};
+      const e=sState[sid];
+      const w=Math.max(4,(e.out-e.in)*pps);
+      const dlg=(s.dialogue||[]);
+      const txt=dlg.map(d=>(d.text||'')).filter(Boolean).join(' · ');
+      if(!dlg.length){
+        html+=`<div class="sub-clip spacer" style="width:${w}px"></div>`;
+      }else{
+        const off=!subAll||subOff.has(sid);
+        html+=`<div class="sub-clip ${off?'disabled':''}" style="width:${w}px" title="${txt.replace(/"/g,'')}" onclick="toggleSub('${sid}')">
+          <span class="sub-txt">${txt}</span>
+        </div>`;
+      }
+    });
+  }else{
+    html+=`<span class="hint">本片无对白字幕</span>`;
+  }
+  html+=`</div></div>`;
+
+  inner.innerHTML=html;
+  drawWaveforms();
+  let ph=document.getElementById('playhead');
+  if(!ph){ph=document.createElement('div');ph.id='playhead';ph.className='playhead';}
+  inner.appendChild(ph);
+  updatePlayhead();
+}
+
+let dIdx=null;
+function dStart(e){dIdx=+e.currentTarget.dataset.i;e.currentTarget.style.opacity=.5;}
+function dOver(e){e.preventDefault();}
+function dDrop(e){e.preventDefault();const t=+e.currentTarget.dataset.i;if(dIdx==null||dIdx===t)return;const x=order.splice(dIdx,1)[0];order.splice(t,0,x);renderTimeline();}
+function dEnd(e){e.currentTarget.style.opacity=1;dIdx=null;}
+
+function startTrim(e,track,sid,edge){
+  e.stopPropagation();e.preventDefault();
+  sel={track,sid};renderTimeline();renderInspector();
+  const st=curState();if(!st)return;
+  const dur=(track==='music')?totalDur():origOf();
+  const startX=e.clientX;
+  const oin=st.in;const oout=(st.out>0?st.out:dur);
+  document.body.style.cursor='ew-resize';
+  function mv(ev){
+    const dx=(ev.clientX-startX)/pps;
+    if(edge==='l'){st.in=Math.min(oout-0.2,Math.max(0,oin+dx));}
+    else{
+      let raw=oout+dx;
+      if(track==='music'){st.out=(raw>=dur)?0:Math.min(dur,Math.max(st.in+0.2,raw));}
+      else{st.out=Math.min(dur,Math.max(st.in+0.2,raw));}
+    }
+    st.in=+st.in.toFixed(3);st.out=(+st.out.toFixed(3))||0;
+    renderTimeline();renderInspector();
+  }
+  function up(){document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);document.body.style.cursor='';}
+  document.addEventListener('mousemove',mv);document.addEventListener('mouseup',up);
+}
+
+function selClip(track,sid){sel={track,sid};renderTimeline();renderInspector();}
+function curState(){
+  if(!sel)return null;
+  if(sel.track==='video')return vState[sel.sid];
+  if(sel.track==='tts')return tState[sel.sid];
+  if(sel.track==='ambient')return aState[sel.sid];
+  if(sel.track==='music')return mState;
+  return null;
+}
+function renderInspector(){
+  if(!sel){document.getElementById('inspector').classList.remove('show');return;}
+  const st=curState();if(!st)return;
+  document.getElementById('inspector').classList.add('show');
+  let title,meta='';
+  if(sel.track==='music'){title='🎵 音乐 · 整轨';meta='整轨裁剪（留空出点=到结尾）';}
+  else{
+    const s=origScenes.find(x=>x.sid===sel.sid)||{};
+    const tn={video:'🎬 视频',tts:'🎙️ 配音',ambient:'🌊 场景音'}[sel.track];
+    title=`${tn} · ${sel.sid}`;
+    meta=`${s.location||''} · 原镜 ${(s.duration||5).toFixed(1)}s`;
+    const dlg=(s.dialogue||[]).map(d=>(d.text||'')).filter(Boolean).join(' / ');
+    document.getElementById('inspDlg').textContent=dlg?('💬 '+dlg):'';
+    document.getElementById('inspBlk').textContent=s.blocking?('🎭 站位：'+s.blocking):'';
+    const v=document.getElementById('inspVideo');
+    v.src=(sel.track==='video'&&s.video_url)?API+s.video_url:'';
+  }
+  document.getElementById('inspTitle').textContent=title;
+  document.getElementById('inspMeta').textContent=meta;
+  if(sel.track==='music'){document.getElementById('inspDlg').textContent='';document.getElementById('inspBlk').textContent='';document.getElementById('inspVideo').src='';}
+  document.getElementById('inspEn').checked=st.enabled;
+  document.getElementById('inspIn').value=+st.in.toFixed(2);
+  document.getElementById('inspIn').max=(sel.track==='music')?9999:(origScenes.find(x=>x.sid===sel.sid)?.duration||5);
+  document.getElementById('inspOut').value=st.out>0?+st.out.toFixed(2):'';
+  document.getElementById('inspOut').placeholder='到结尾';
+  document.getElementById('inspOut').max=(sel.track==='music')?9999:(origScenes.find(x=>x.sid===sel.sid)?.duration||5);
+  document.getElementById('inspDur').value=Math.max(0,(st.out>0?st.out:9999)-st.in).toFixed(2)+'s';
+}
+function origOf(){const s=origScenes.find(x=>x.sid===sel.sid)||{};return s.duration||5;}
+function toggleSel(v){const st=curState();if(st){st.enabled=v;renderTimeline();}}
+function setSelIn(v){const st=curState();if(!st)return;let n=Math.max(0,parseFloat(v)||0);if(sel.track!=='music'&&n>st.out-0.2)n=st.out-0.2;st.in=n;renderTimeline();renderInspector();}
+function setSelOut(v){const st=curState();if(!st)return;let raw=parseFloat(v);if(isNaN(raw))raw=0;if(sel.track!=='music'&&raw>origOf())raw=origOf();if(raw<st.in+0.2)raw=st.in+0.2;st.out=raw;renderTimeline();renderInspector();}
+
+function toggleMute(key){if(!tracksCfg[key])return;tracksCfg[key].enabled=!tracksCfg[key].enabled;renderTimeline();}
+function toggleSolo(key){if(solo.has(key))solo.delete(key);else solo.add(key);renderTimeline();}
+function setVol(key,v){if(!tracksCfg[key])return;tracksCfg[key].volume=parseFloat(v);const el=document.getElementById('vol_'+key);if(el)el.textContent=Math.round(v*100);}
+function toggleSubAll(){subAll=!subAll;renderTimeline();updateCaption(pvGlobalT());}
+function toggleSub(sid){if(subOff.has(sid))subOff.delete(sid);else subOff.add(sid);renderTimeline();updateCaption(pvGlobalT());}
+// 当前预览的全局时间轴时间（基于视频主轨位置）
+function pvGlobalT(){
+  const seg=pv.segs[pv.idx];
+  if(!seg)return null;
+  return seg.startX/pps+(pv.curT-seg.in);
+}
+// 按全局时间查字幕轨（字幕独立，溢出也照常覆盖）
+function updateCaption(gt){
+  const el=document.getElementById('pvCap');if(!el)return;
+  if(gt==null){el.innerHTML='';return;}
+  const sub=pv.subSegs.find(s=>gt>=s.startX/pps && gt<(s.startX/pps+(s.out-s.in)))
+          || pv.subSegs.find(s=>gt>=s.startX/pps);
+  if(!sub){el.innerHTML='';return;}
+  const on=subAll&&!subOff.has(sub.sid)&&sub.enabled&&sub.dlg.length;
+  el.innerHTML=on?sub.dlg.map(d=>(d.text||'')).filter(Boolean).map(t=>`<span>${t}</span>`).join(' / '):'';
+}
+
+function uploadMusic(){
+  const inp=document.createElement('input');inp.type='file';inp.accept='audio/*';
+  inp.onchange=async()=>{
+    const f=inp.files[0];if(!f)return;
+    const fd=new FormData();fd.append('file',f);
+    try{
+      const r=await fetch(API+`/api/projects/${pid}/edit/music`,{method:'POST',body:fd});
+      const j=await r.json();
+      if(!j.ok)throw new Error(j.error||'上传失败');
+      tracksCfg.music.available=true;tracksCfg.music.enabled=true;tracksCfg.music.filename=j.filename;tracksCfg.music.url=j.url;
+      mState.enabled=true;
+      renderTimeline();alert('音乐已上传：'+j.filename);
+    }catch(e){alert('上传失败：'+e.message);}
+  };
+  inp.click();
+}
+
+function setZoom(v){pps=+v;document.getElementById('zoomVal').textContent=v;renderTimeline();if(sel)renderInspector();}
+function resetAll(){
+  vState={};tState={};aState={};sState={};
+  origScenes.forEach(s=>{const d=s.duration||5;vState[s.sid]={in:0,out:d,enabled:true};tState[s.sid]={in:0,out:d,enabled:true};aState[s.sid]={in:0,out:d,enabled:true};sState[s.sid]={in:0,out:d,enabled:true};});
+  sel=null;solo.clear();mState={enabled:!!(tracksCfg&&tracksCfg.music&&tracksCfg.music.enabled),in:0,out:0};
+  if(tracksCfg)Object.values(tracksCfg).forEach(t=>{if(t.available)t.enabled=true;});
+  document.getElementById('inspector').classList.remove('show');renderTimeline();
+}
+
+function buildAudioTracks(){
+  if(!tracksCfg)return null;
+  const hasSolo=solo.size>0;
+  const en=key=>hasSolo?solo.has(key):!!(tracksCfg[key]&&tracksCfg[key].enabled);
+  const m=tracksCfg.music||{};
+  return {
+    tts:{enabled:en('tts'),volume:tracksCfg.tts?tracksCfg.tts.volume:1.0},
+    ambient:{enabled:en('ambient'),volume:tracksCfg.ambient?tracksCfg.ambient.volume:0.32},
+    music:{enabled:en('music')&&!!m.filename,volume:m.volume!=null?m.volume:0.5,path:m.filename?('music/'+m.filename):null},
+  };
+}
+function buildAudioClips(){
+  if(!tracksCfg)return null;
+  const tts={},amb={};
+  order.forEach(sid=>{tts[sid]=tState[sid];amb[sid]=aState[sid];});
+  return {tts,ambient:amb,music:{enabled:mState.enabled,in:r2(mState.in),out:r2(mState.out)}};
+}
+async function exportEdit(){
+  if(!order.length)return;
+  const btn=document.getElementById('exportBtn');btn.disabled=true;
+  const edits=order.map(sid=>({sid,in:r2(vState[sid].in),out:r2(vState[sid].out),enabled:vState[sid].enabled}));
+  const subDis=order.filter(sid=>{const s=origScenes.find(x=>x.sid===sid)||{};return (s.dialogue||[]).length>0&&(!subAll||subOff.has(sid));});
+  const body={edits,audio_tracks:buildAudioTracks(),audio_clips:buildAudioClips(),subtitle_disabled:subDis};
+  try{
+    const data=await api(`/api/projects/${pid}/edit/render`,{method:'POST',body});
+    pollJob(data.job_id);
+  }catch(e){alert('导出失败：'+e.message);btn.disabled=false;}
+}
+function pollJob(jobId){
+  const job=document.getElementById('job');job.style.display='block';
+  const iv=setInterval(async()=>{
+    try{
+      const j=await api(`/api/jobs/${jobId}`);
+      document.getElementById('jobLogs').textContent=(j.logs||[]).join('\n');
+      document.getElementById('jobStatus').textContent=j.status==='done'?'✅ 完成':j.status==='failed'?'❌ 失败':'⏳ 执行中...';
+      if(j.status==='done'){
+        clearInterval(iv);document.getElementById('exportBtn').disabled=false;
+        if(j.result){
+          const file=API+'/api/project-files/'+pid+'/'+j.result.split('/').pop();
+          location.href='/result.html?project='+encodeURIComponent(pid)+'&file='+encodeURIComponent(file);
+          return;
+        }
+      }else if(j.status==='failed'){clearInterval(iv);document.getElementById('exportBtn').disabled=false;}
+    }catch(e){clearInterval(iv);document.getElementById('exportBtn').disabled=false;}
+  },1500);
+}
+function closeJob(){const j=document.getElementById('job');if(j)j.style.display='none';}
+
+function buildPreviewSegs(){
+  let acc=0;const segs=[];
+  order.forEach(sid=>{
+    const s=origScenes.find(x=>x.sid===sid)||{};
+    const od=s.duration||5;const e=vState[sid];
+    const o=e.out>0?r2(e.out):od;
+    const segDur=Math.max(0,o-e.in);
+    segs.push({sid,in:r2(e.in),out:o,enabled:e.enabled,od,startX:acc*pps,hasVideo:!!s.video_url});
+    acc+=segDur;
+  });
+  pv.total=acc;
+  document.getElementById('pvTotal').textContent=acc.toFixed(1);
+  pv.subSegs=buildSubSegs();
+  return segs;
+}
+// 字幕轨独立分段（基于 sState，与视频轨错开也照常覆盖）
+function buildSubSegs(){
+  let acc=0;const segs=[];
+  order.forEach(sid=>{
+    const s=origScenes.find(x=>x.sid===sid)||{};
+    const od=s.duration||5;const e=sState[sid];
+    const o=e.out>0?r2(e.out):od;
+    const dur=Math.max(0,o-e.in);
+    segs.push({sid,in:r2(e.in),out:o,enabled:e.enabled,startX:acc*pps,dlg:(s.dialogue||[])});
+    acc+=dur;
+  });
+  return segs;
+}
+function playPreview(){
+  if(pv.playing){pausePreview();return;}
+  pv.segs=buildPreviewSegs();
+  pv.idx=0;pv.curT=pv.segs.length?pv.segs[0].in:0;
+  pv._capIdx=-1;
+  pv.playing=true;
+  document.getElementById('pvPlay').textContent='⏸ 暂停';
+  loadSeg(0,pv.curT);
+  pv.raf=requestAnimationFrame(pvTick);
+}
+function loadSeg(i,fromT){
+  const seg=pv.segs[i];if(!seg)return;
+  pv.idx=i;pv.curT=fromT!=null?fromT:seg.in;
+  const v=document.getElementById('pvVideo');
+  if(seg.hasVideo){
+    const s=origScenes.find(x=>x.sid===seg.sid)||{};
+    const url=API+s.video_url;
+    pv._switching=true;
+    if(pv.curSid!==seg.sid){pv.curSid=seg.sid;v.src=url;v.onloadedmetadata=()=>{pv._switching=false;try{v.currentTime=pv.curT;}catch(e){}v.play().catch(()=>{});};}
+    else{const go=()=>{pv._switching=false;try{v.currentTime=pv.curT;}catch(e){}v.play().catch(()=>{});};if(v.readyState>=1)go();else v.onloadedmetadata=go;}
+  }else{
+    pv.curSid=null;
+    try{v.pause();v.removeAttribute('src');v.load();}catch(e){}
+    seg._t0=performance.now()-(Math.max(seg.in,pv.curT)-seg.in)*1000;
+  }
+}
+// 预载首段视频：让监视器原生播放按钮一开始就可点
+function primePreview(){
+  pv.segs=buildPreviewSegs();
+  if(!pv.segs.length){pv.subSegs=[];return;}
+  pv.idx=0;pv.curT=pv.segs[0].in;pv.playing=false;
+  const seg=pv.segs[0],v=document.getElementById('pvVideo');
+  if(seg.hasVideo){
+    const s=origScenes.find(x=>x.sid===seg.sid)||{};
+    v.src=API+s.video_url;v.onloadedmetadata=()=>{try{v.currentTime=seg.in;}catch(e){}};
+  }
+  updatePlayhead();updatePvTime();updateCaption(0);
+}
+// 让原生播放/暂停驱动同步预览（修复初始无法点击播放）
+function bindPreviewVideo(){
+  if(pv._bound)return;pv._bound=true;
+  const v=document.getElementById('pvVideo');
+  v.addEventListener('play',()=>{
+    if(pv.playing)return;
+    if(!pv.segs.length)pv.segs=buildPreviewSegs();
+    pv.playing=true;document.getElementById('pvPlay').textContent='⏸ 暂停';
+    pv.raf=requestAnimationFrame(pvTick);
+  });
+  v.addEventListener('pause',()=>{
+    if(pv._switching)return;          // 片段切换导致的暂停，忽略
+    if(pv.playing)pausePreview();
+  });
+}
+function pvTick(){
+  if(!pv.playing)return;
+  const seg=pv.segs[pv.idx];if(!seg){stopPreview(true);return;}
+  const v=document.getElementById('pvVideo');
+  let t;
+  if(seg.hasVideo){
+    // 片段切换/新视频尚未就绪时 v.currentTime 会短暂为 0，保持当前时间避免播放头回跳
+    if(pv._switching||v.readyState<1) t=pv.curT;
+    else t=v.currentTime;
+  }else{
+    t=seg.in+(performance.now()-seg._t0)/1000;
+  }
+  pv.curT=t;
+  const gt=seg.startX/pps+(t-seg.in);
+  updateCaption(gt);
+  if(t>=seg.out-0.04){
+    if(pv.idx+1<pv.segs.length){loadSeg(pv.idx+1,pv.segs[pv.idx+1].in);}
+    else{stopPreview(true);return;}
+  }
+  updatePlayhead();updatePvTime();
+  pv.raf=requestAnimationFrame(pvTick);
+}
+function pausePreview(){
+  pv.playing=false;cancelAnimationFrame(pv.raf);
+  try{document.getElementById('pvVideo').pause();}catch(e){}
+  document.getElementById('pvPlay').textContent='▶ 预览整片';
+}
+function stopPreview(done){
+  pv.playing=false;cancelAnimationFrame(pv.raf);
+  try{document.getElementById('pvVideo').pause();}catch(e){}
+  document.getElementById('pvPlay').textContent='▶ 预览整片';
+  if(done){pv.idx=0;pv.curT=0;pv.curSid=null;pv._capIdx=-1;updatePlayhead();updatePvTime();updateCaption(null);}
+}
+function updatePvTime(){
+  const el=document.getElementById('pvTime');if(el)el.textContent=(pv.curT||0).toFixed(1);
+}
+function updatePlayhead(){
+  const el=document.getElementById('playhead');if(!el)return;
+  const seg=pv.segs[pv.idx];
+  let x;
+  if(seg){
+    // 直接读取时间轴上真实渲染的视频片段 DOM 位置（含 clip 的 margin/边框），
+    // 避免 buildPreviewSegs 的 startX 估算与片段实际像素位置因边距累积产生偏差，
+    // 否则播放头会与监视器里实际播放的视频片段对不上。
+    const clip=document.querySelector('.v1 .clip[data-i="'+pv.idx+'"]');
+    if(clip&&clip.offsetWidth){
+      const frac=(pv.curT-seg.in)/Math.max(1e-6,(seg.out-seg.in));
+      x=clip.offsetLeft+frac*clip.offsetWidth;
+    }else{
+      x=seg.startX+(pv.curT-seg.in)*pps;
+    }
+  }else x=0;
+  el.style.left=(HW+x)+'px';
+  el.style.display=(pv.playing||pv.curT>0)?'block':'none';
+}
+function scrub(e){
+  const ruler=e.currentTarget;
+  const x=e.clientX-ruler.getBoundingClientRect().left;
+  let segs=pv.segs;if(!segs.length)segs=buildPreviewSegs();
+  // 按时间轴上真实渲染的视频片段 DOM 位置定位，避免边距累积导致进度对不上
+  const clips=[...document.querySelectorAll('.v1 .clip')];
+  const c=clips.find(cl=>x>=cl.offsetLeft && x<cl.offsetLeft+cl.offsetWidth);
+  let target,local;
+  if(c){
+    const i=+c.dataset.i;
+    target=segs[i];
+    const frac=(x-c.offsetLeft)/Math.max(1,c.offsetWidth);
+    local=Math.max(target.in,Math.min(target.out,target.in+frac*(target.out-target.in)));
+  }else{
+    const t=Math.max(0,x/pps);
+    target=segs.find(s=>t>=s.startX/pps && t<(s.startX/pps+(s.out-s.in)))||segs[segs.length-1];
+    local=Math.max(target.in,Math.min(target.out,t-target.startX/pps));
+  }
+  pv.segs=segs;pv.idx=segs.indexOf(target);
+  pv.curT=local;updatePlayhead();updatePvTime();
+  updateCaption(target.startX/pps+(local-target.in));
+  if(pv.playing){loadSeg(pv.idx,local);}
+  else{
+    const v=document.getElementById('pvVideo');
+    if(target.hasVideo){v.src=API+(origScenes.find(x=>x.sid===target.sid)||{}).video_url;v.onloadedmetadata=()=>{try{v.currentTime=local;}catch(e){}};}
+  }
+}
+
+/* 左侧菜单栏导航由共享组件 /sidebar.js 提供 */
+
+  init();
+</script>
+
+<script>
+/* ================= AI 剪辑助手 ================= */
+let _aiHi=false;
+function aiToggle(){const p=document.getElementById('aiPanel');const open=p.classList.toggle('open');
+  if(open&&!_aiHi){_aiHi=true;aiAdd('bot','你好，我是 AI 剪辑助手 🤖（已接入大模型）\n用自然语言告诉我想怎么剪，例如：\n· 把第2段视频缩短到3秒\n· 剪掉第3段配音开头的1秒\n· 静音场景音 / 独奏音乐\n· 把打斗那场挪到最后\n· 把第2段改成两人在雨中争吵（改写内容）\n· 隐藏所有字幕 / 重置全部');}}
+function aiQuick(b){document.getElementById('aiText').value=b.textContent;aiSend();}
+function aiAdd(role,text){const m=document.getElementById('aiMsgs');const d=document.createElement('div');d.className='ai-msg '+role;d.textContent=text;m.appendChild(d);m.scrollTop=m.scrollHeight;}
+function aiSend(){const inp=document.getElementById('aiText');const t=inp.value.trim();if(!t)return;inp.value='';aiAdd('me',t);aiSendDo(t);}
+async function aiSendDo(t){
+  aiSetBusy(true);
+  try{
+    const snap=aiSnapshot();
+    const data=await api(`/api/projects/${pid}/edit/ai`,{method:'POST',body:{command:t,state:snap}});
+    if(data.error){aiFallback(t,data.msg);return;}
+    const ops=data.operations||[];
+    if(!ops.length){aiAdd('bot',data.reply||'没太理解这条指令 😅。可以换个说法，例如：把第2段视频缩短到3秒。');return;}
+    applyOps(ops);
+    renderTimeline();primePreview();updatePlayhead();updatePvTime();if(pv.playing)updateCaption(pvGlobalT());
+    aiAdd('bot',data.reply||('已执行 '+ops.length+' 项操作。'));
+  }catch(e){aiFallback(t,e.message);}
+  finally{aiSetBusy(false);}
+}
+// 后端不可用（无 key / 网络）时，回退到本地规则解析
+function aiFallback(t,msg){
+  const r=aiParse(t);
+  if(!r.ok){aiAdd('err',(msg?('（AI 大模型不可用：'+msg+'）\n'):'')+r.reply);return;}
+  try{r.apply();renderTimeline();primePreview();updatePlayhead();updatePvTime();if(pv.playing)updateCaption(pvGlobalT());aiAdd('bot',r.reply);}
+  catch(e){aiAdd('err','执行出错：'+e.message);}
+}
+// 当前编辑器状态快照，供大模型理解上下文
+function aiSnapshot(){
+  const sc=origScenes.map(s=>({sid:s.sid,location:s.location||'',mood:s.mood||'',duration:s.duration||5,dialogue:(s.dialogue||[]).map(d=>({character:d.character||'',text:d.text||''}))}));
+  const pack=st=>{const o={};for(const k in st)o[k]={in:st[k].in,out:st[k].out,enabled:st[k].enabled};return o;};
+  return {order:order.slice(),scenes:sc,vState:pack(vState),tState:pack(tState),aState:pack(aState),sState:pack(sState),
+    tracksCfg:tracksCfg,mState:{enabled:mState.enabled,in:mState.in,out:mState.out},subAll:subAll,subOff:[...subOff],solo:[...solo]};
+}
+// 执行大模型返回的操作列表
+function applyOps(ops){ops.forEach(applyOp);}
+function applyOp(o){
+  const idx=o.index!=null?o.index-1:null;
+  const sid=idx!=null&&order[idx]?order[idx]:null;
+  switch(o.op){
+    case 'trim':{
+      if(o.track==='music'){if(o.in!=null)mState.in=Math.max(0,o.in);if(o.out!=null)mState.out=Math.max(mState.in,o.out);}
+      else{const st=aiState(o.track,sid);if(!st)break;if(o.in!=null)st.in=aiClampIn(o.in,sid);if(o.out!=null)st.out=aiClampOut(o.out,sid,st);}
+      break;}
+    case 'setDuration':{const st=aiState(o.track,sid);if(!st)break;st.out=Math.max(st.in+0.2,Math.min(st.in+(o.duration||0),aiOD(sid)));break;}
+    case 'enable':{const st=aiState(o.track,sid);if(st)st.enabled=!!o.enabled;break;}
+    case 'trackEnable':{if(tracksCfg&&tracksCfg[o.track])tracksCfg[o.track].enabled=!!o.enabled;if(o.track==='music')mState.enabled=!!o.enabled;break;}
+    case 'trackSolo':{solo.clear();solo.add(o.track);break;}
+    case 'trackVolume':{if(tracksCfg&&tracksCfg[o.track]){tracksCfg[o.track].volume=Math.min(1.5,Math.max(0,o.volume||0));const el=document.getElementById('vol_'+o.track);if(el)el.textContent=Math.round(tracksCfg[o.track].volume*100);}break;}
+    case 'subtitle':{
+      if(o.scope==='all')subAll=!!o.enabled;
+      else if(sid){if(o.enabled)subOff.delete(sid);else subOff.add(sid);}
+      break;}
+    case 'swap':{if(o.a&&o.b){const a=o.a-1,b=o.b-1;if(a>=0&&b>=0&&a<order.length&&b<order.length){const tmp=order[a];order[a]=order[b];order[b]=tmp;}}break;}
+    case 'reorder':{const a=(o.from||1)-1,pos=o.to||1,b=Math.max(0,Math.min(order.length-1,pos-1));if(a>=0&&a<order.length){const [it]=order.splice(a,1);order.splice(b,0,it);}break;}
+    case 'setDialogue':{
+      if(sid){const sc=origScenes.find(x=>x.sid===sid);
+        if(sc&&Array.isArray(o.dialogue)){
+          sc.dialogue=o.dialogue.map(d=>({character:d.character||'',text:d.text||''})).filter(d=>d.text);
+        }}
+      break;}
+    case 'play':playPreview();break;
+    case 'stop':stopPreview(true);break;
+    case 'reset':resetAll();break;
+  }
+}
+function aiState(track,sid){if(!sid)return null;if(track==='video')return vState[sid];if(track==='tts')return tState[sid];if(track==='ambient')return aState[sid];if(track==='sub')return sState[sid];return null;}
+function aiOD(sid){return (origScenes.find(x=>x.sid===sid)||{}).duration||5;}
+function aiClampIn(v,sid){const od=aiOD(sid);return Math.max(0,Math.min(v,od-0.2));}
+function aiClampOut(v,sid,st){const od=aiOD(sid);return Math.max((st?st.in:0)+0.2,Math.min(v,od));}
+function aiSetBusy(on){
+  const inp=document.getElementById('aiText'),btn=document.querySelector('.ai-input button');
+  if(on){inp.disabled=true;if(btn)btn.disabled=true;aiAdd('bot','🤖 思考中…');window._aiThinking=document.querySelector('#aiMsgs .ai-msg:last-child');}
+  else{inp.disabled=false;if(btn)btn.disabled=false;if(window._aiThinking){window._aiThinking.remove();window._aiThinking=null;}}
+}
+function _idxs(t){const out=[];let m;const re=/第\s*(\d+)\s*[段个]/g;while((m=re.exec(t)))out.push(parseInt(m[1])-1);
+  if(!out.length){const cn={'一':0,'二':1,'两':1,'三':2,'四':3,'五':4,'六':5,'七':6,'八':7,'九':8,'十':9};const re2=/第\s*([一二两三四五六七八九十])\s*[段个]/g;while((m=re2.exec(t)))out.push(cn[m[1]]);}
+  return out;}
+function _trackOf(t){if(/视频|画面|V1/i.test(t))return 'video';if(/配音|旁白|TTS|tts/i.test(t))return 'tts';
+  if(/场景音|环境音|音效|ambient/i.test(t))return 'ambient';if(/字幕|CC/i.test(t))return 'sub';if(/音乐|music/i.test(t))return 'music';return null;}
+function _secOf(t){const m=t.match(/(\d+(?:\.\d+)?)\s*秒/);return m?parseFloat(m[1]):null;}
+function _pctOf(t){let m=t.match(/(\d+(?:\.\d+)?)\s*%/);if(m)return parseFloat(m[1]);m=t.match(/百分之\s*(\d+)/);return m?parseFloat(m[1]):null;}
+function _labelOf(tk){return {video:'视频',tts:'配音',ambient:'场景音',sub:'字幕',music:'音乐'}[tk]||tk;}
+function _stateOf(tk,sid){if(tk==='video')return vState[sid];if(tk==='tts')return tState[sid];if(tk==='ambient')return aState[sid];if(tk==='sub')return sState[sid];return null;}
+function _origOf(sid){return (origScenes.find(x=>x.sid===sid)||{}).duration||5;}
+
+function aiParse(cmd){
+  const t=cmd;
+  if(/播放|预览整片|▶/.test(t)&&!/停止|暂停/.test(t))return {ok:true,reply:'▶ 已开始播放整片预览。',apply:()=>playPreview()};
+  if(/停止|暂停/.test(t))return {ok:true,reply:'⏹ 已停止预览。',apply:()=>stopPreview(true)};
+  if(/重置|恢复默认|还原|清空/.test(t))return {ok:true,reply:'↺ 已重置所有剪辑（裁剪/静音/顺序全部还原）。',apply:()=>resetAll()};
+
+  const idxs=_idxs(t), sec=_secOf(t);
+  let tk=_trackOf(t);
+  if(!tk&&idxs.length&&sec!=null&&/缩短|剪|时长|保留|入点|出点|前|开头|中间/.test(t))tk='video';
+
+  // 字幕显隐
+  if(/字幕/.test(t)){
+    if(/隐藏|关|不显示|去掉/.test(t)){
+      if(idxs.length){const sid=order[idxs[0]];if(sid)subOff.add(sid);return {ok:true,reply:`已隐藏第${idxs[0]+1}段字幕。`,apply:()=>{}};}
+      subAll=false;return {ok:true,reply:'已隐藏全部字幕。',apply:()=>{}};
+    }
+    if(/显示|开|恢复/.test(t)){
+      if(idxs.length){const sid=order[idxs[0]];if(sid)subOff.delete(sid);return {ok:true,reply:`已显示第${idxs[0]+1}段字幕。`,apply:()=>{}};
+      subAll=true;return {ok:true,reply:'已显示全部字幕。',apply:()=>{}};}
+    }
+  }
+
+  // 音轨：静音 / 取消静音 / 独奏 / 音量
+  if(tk&&tk!=='sub'){
+    if(!tracksCfg||!tracksCfg[tk])return {ok:false,reply:`当前项目没有${_labelOf(tk)}轨。`};
+    if(/静音/.test(t))return {ok:true,reply:`已静音${_labelOf(tk)}轨。`,apply:()=>{tracksCfg[tk].enabled=false;}};
+    if(/取消静音|开启|打开|恢复/.test(t))return {ok:true,reply:`已开启${_labelOf(tk)}轨。`,apply:()=>{tracksCfg[tk].enabled=true;}};
+    if(/独奏|solo/i.test(t))return {ok:true,reply:`已独奏${_labelOf(tk)}轨。`,apply:()=>{solo.clear();solo.add(tk);}};
+    const pct=_pctOf(t);
+    if(/音量/.test(t)&&pct!=null){const vol=Math.min(1.5,pct/100);return {ok:true,reply:`${_labelOf(tk)}音量已设为 ${pct}%。`,apply:()=>{tracksCfg[tk].volume=vol;const el=document.getElementById('vol_'+tk);if(el)el.textContent=Math.round(vol*100);}};}
+  }
+
+  // 片段 启用 / 禁用（含字幕用 subOff）
+  if(idxs.length&&tk){
+    const sid=order[idxs[0]];if(!sid)return {ok:false,reply:'找不到该片段。'};
+    if(tk==='sub'){
+      if(/禁用|关|不显示|隐藏/.test(t)){subOff.add(sid);return {ok:true,reply:`已隐藏第${idxs[0]+1}段字幕。`,apply:()=>{}};}
+      if(/启用|显示|打开/.test(t)){subOff.delete(sid);return {ok:true,reply:`已显示第${idxs[0]+1}段字幕。`,apply:()=>{}};}
+    }
+    const st=_stateOf(tk,sid);if(!st)return {ok:false,reply:`${_labelOf(tk)}轨没有该片段状态。`};
+    if(/禁用|关|不显示|隐藏/.test(t))return {ok:true,reply:`已禁用第${idxs[0]+1}段${_labelOf(tk)}。`,apply:()=>{st.enabled=false;}};
+    if(/启用|显示|打开/.test(t))return {ok:true,reply:`已启用第${idxs[0]+1}段${_labelOf(tk)}。`,apply:()=>{st.enabled=true;}};
+  }
+
+  // 裁剪 / 时长（轨道 + 第N段 + 秒数）
+  if(idxs.length&&tk&&tk!=='sub'&&sec!=null){
+    const sid=order[idxs[0]];if(!sid)return {ok:false,reply:'找不到该片段。'};
+    const st=_stateOf(tk,sid);if(!st)return {ok:false,reply:`${_labelOf(tk)}轨没有该片段状态。`};
+    const od=_origOf(sid);
+    if(/从\s*(\d+(?:\.\d+)?)\s*秒\s*(开始|起)|入点/.test(t)){st.in=Math.max(0,Math.min(sec,od-0.2));return {ok:true,reply:`第${idxs[0]+1}段${_labelOf(tk)}入点设为 ${st.in.toFixed(1)}s。`,apply:()=>{}};}
+    if(/到\s*(\d+(?:\.\d+)?)\s*秒\s*(结束|止)|出点/.test(t)){st.out=Math.max(st.in+0.2,Math.min(sec,od));return {ok:true,reply:`第${idxs[0]+1}段${_labelOf(tk)}出点设为 ${st.out.toFixed(1)}s。`,apply:()=>{}};}
+    if(/剪掉|去掉|删(除|掉)|截(去|掉)|掐掉/.test(t)&&/前|开头|开始|入/.test(t)){st.in=Math.max(0,Math.min(sec,od-0.2));return {ok:true,reply:`第${idxs[0]+1}段${_labelOf(tk)}剪掉开头 ${sec}s（入点 ${st.in.toFixed(1)}s）。`,apply:()=>{}};}
+    if(/中间|中段/.test(t)){const half=od/2;st.in=Math.max(0,half-sec/2);st.out=Math.min(od,half+sec/2);return {ok:true,reply:`第${idxs[0]+1}段${_labelOf(tk)}保留中间 ${sec}s。`,apply:()=>{}};}
+    if(/缩短|剪(短|到|至)|时长|保留|设为|改(成|为)|变成/.test(t)){st.out=Math.max(st.in+0.2,Math.min(st.in+sec,od));return {ok:true,reply:`第${idxs[0]+1}段${_labelOf(tk)}时长设为 ${sec}s（出点 ${st.out.toFixed(1)}s）。`,apply:()=>{}};}
+  }
+
+  // 移动：把第A段移到第B位
+  const mv=t.match(/把第\s*(\d+)\s*[段个]\s*(?:移动|移到|挪到|放到)\s*第\s*(\d+)\s*位/);
+  if(mv){const a=parseInt(mv[1])-1,pos=parseInt(mv[2]);const b=Math.max(0,Math.min(order.length-1,pos-1));
+    if(a>=0&&a<order.length){const [it]=order.splice(a,1);order.splice(b,0,it);return {ok:true,reply:`已把第${a+1}段移到第${pos}位。`,apply:()=>{}};}}
+
+  // 调换：调换/交换第A段和第B段
+  if(/调换|交换|互换|对调/.test(t)&&idxs.length>=2){
+    const a=idxs[0],b=idxs[1];if(a<order.length&&b<order.length){const tmp=order[a];order[a]=order[b];order[b]=tmp;return {ok:true,reply:`已调换第${a+1}段与第${b+1}段。`,apply:()=>{}};}
+  }
+
+  return {ok:false,reply:'没太理解这条指令 😅。可以试试：\n· 把第2段视频缩短到3秒\n· 剪掉第3段配音开头的1秒\n· 静音场景音 / 独奏音乐\n· 调换第1和第2段\n· 隐藏所有字幕 / 重置全部'};
+}
+</script>
+<!-- 统一左侧菜单栏组件（所有页面共用） -->
+<script src="/sidebar.js"></script>
+</body>
+</html>

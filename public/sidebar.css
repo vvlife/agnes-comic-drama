@@ -1,0 +1,67 @@
+/* =========================================================
+   统一左侧菜单栏组件（sidebar.css）
+   被 index.html / editor.html 共用。
+   颜色变量做了回退，兼容两页不同的 :root 命名
+   （editor 用 --panel*，index 用 --surface*）。
+   ========================================================= */
+:root{ --sbw:214px; }
+
+body{ padding-left:var(--sbw); transition:padding-left .18s; }
+body.nav-collapsed{ padding-left:66px; }
+
+.sidebar{
+  position:fixed; left:0; top:0; bottom:0; width:var(--sbw);
+  background:var(--panel, var(--surface, #13131a));
+  border-right:1px solid var(--border, #2a2a3a);
+  display:flex; flex-direction:column; padding:14px 12px; z-index:50;
+  transition:width .18s; overflow:hidden;
+}
+.sidebar.collapsed{ width:66px; }
+.sidebar .brand{
+  display:flex; align-items:center; gap:10px; padding:6px 8px 16px;
+  font-weight:700; font-size:15px; white-space:nowrap;
+  color:var(--text, #e8e8f0);
+}
+.sidebar .brand .lg{ font-size:22px; line-height:1; flex-shrink:0; }
+.sidebar.collapsed .brand .lbl{ display:none; }
+
+.nav{ display:flex; flex-direction:column; gap:5px; flex:1; overflow-y:auto; padding-right:2px; }
+.nav-group{
+  font-size:11px; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--text3, #555570); padding:14px 12px 4px; font-weight:700; white-space:nowrap;
+}
+.nav-group:first-child{ padding-top:4px; }
+.sidebar.collapsed .nav-group{ text-align:center; padding:14px 0 4px; font-size:9px; }
+
+.nav-item{
+  display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:10px;
+  color:var(--text2, #8888a0); font-size:14px; cursor:pointer; background:none;
+  border:none; text-align:left; width:100%; transition:.15s; white-space:nowrap;
+}
+.nav-item:hover{ background:var(--panel3, var(--surface3, #222233)); color:var(--text, #e8e8f0); }
+.nav-item.active{ background:var(--glow, rgba(124,92,231,.28)); color:#fff; }
+.nav-item .ic{ font-size:18px; width:22px; text-align:center; flex-shrink:0; line-height:1; }
+.nav-item .lbl{ flex:1; }
+.sidebar.collapsed .nav-item{ justify-content:center; padding:11px 0; }
+.sidebar.collapsed .nav-item .lbl{ display:none; }
+
+/* ---- 次级菜单（子项缩进 + 可展开父节点，默认折叠） ---- */
+.nav-sub{ display:none; }
+.nav-sub.expanded{ display:block; }
+.nav-child{ padding-left:34px !important; font-size:13px; }
+.nav-parent .caret{ margin-left:auto; font-size:11px; color:var(--text3,#555570);
+  transition:transform .15s; transform:rotate(0deg); }
+.nav-parent.expanded .caret{ transform:rotate(90deg); }
+.sidebar.collapsed .nav-parent .caret{ display:none; }
+.sidebar.collapsed .nav-sub{ display:none; }
+
+.nav-foot{ display:flex; align-items:center; gap:8px; padding-top:12px; border-top:1px solid var(--border, #2a2a3a); }
+.nav-toggle{
+  flex:1; display:flex; align-items:center; gap:10px; padding:9px 10px; border-radius:9px;
+  background:var(--panel2, var(--surface2, #1a1a24)); border:1px solid var(--border, #2a2a3a);
+  color:var(--text2, #8888a0); font-size:13px; cursor:pointer; transition:.15s; white-space:nowrap;
+}
+.nav-toggle:hover{ background:var(--panel3, var(--surface3, #222233)); color:var(--text, #e8e8f0); }
+.nav-toggle .ic{ font-size:16px; }
+.sidebar.collapsed .nav-toggle{ justify-content:center; padding:9px 0; }
+.sidebar.collapsed .nav-toggle .lbl{ display:none; }
