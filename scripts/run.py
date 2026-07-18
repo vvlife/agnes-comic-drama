@@ -194,7 +194,8 @@ class RateLimiter:
 
 def generate_script(client: AgnesClient, theme: str, style: str, genre: str,
                     n_scenes: int, scene_duration: int, rate_limiter: RateLimiter,
-                    out_path: pathlib.Path, cp: Checkpoint) -> dict:
+                    out_path: pathlib.Path, cp: Checkpoint,
+                    mode: str = "dialogue", monologue: bool = False) -> dict:
     """用 agnes-2.0-flash 生成剧本 JSON。"""
 
     if cp.is_done("script"):
@@ -207,12 +208,25 @@ def generate_script(client: AgnesClient, theme: str, style: str, genre: str,
     style_info = STYLE_PRESETS.get(style, STYLE_PRESETS["三渲二国风"])
     genre_info = GENRE_PRESETS.get(genre, genre)
 
+    # 解说 / 独白模式：强制单一旁白声轨串成连贯故事线
+    if mode == "narration":
+        _voice = "主角第一人称独白" if monologue else "第三人称解说"
+        narration_block = f"""
+## 本片采用「{_voice}」形式（解说漫剧 / 独白漫剧）
+- 每个镜头额外输出 `narration` 字段（字符串，12-24字），由单一旁白声讲述
+- 全部镜头的 narration 必须串成一条有因果、连贯的故事线：逐镜推进情节（建制→发展→高潮→收尾），前后句环环相扣，听完即知发生了什么、为何发生
+- dialogue 字段必须为空数组 []（不出角色对白）
+- 这条 narration 是整支短片唯一的"讲故事"声轨，禁止孤立、与上下文无关的碎句
+"""
+    else:
+        narration_block = ""
+
     prompt = f"""你是一位专业的漫剧编剧兼分镜师，擅长写出有因果、有潜台词、画面感极强的剧本。请根据以下信息生成分幕剧本，输出严格 JSON。
 
 主题：{theme}
 风格：{style}
 类型：{genre_info}
-总镜头数：{n_scenes}
+{narration_block}总镜头数：{n_scenes}
 每镜头时长：{scene_duration}秒
 
 ## 叙事结构
@@ -256,6 +270,7 @@ def generate_script(client: AgnesClient, theme: str, style: str, genre: str,
       "visual": "光影/质感/道具/色彩补充（80-120字）",
       "blocking": "人物站位与构图（谁在画面何处、彼此关系、与镜头关系）",
       "dialogue": [{{"character": "C1", "text": "有叙事意义的台词（10-25字）", "intent": "这句台词背后的意图"}}],
+      "narration": "解说/独白词（narration 模式必填，dialogue 模式填空字符串）",
       "camera": "镜头运动",
       "mood": "氛围词"
     }}
@@ -1067,6 +1082,14 @@ EDGE_TTS_VOICES = {
     ],
 }
 
+# 旁白/独白声（解说漫剧模式使用单一声轨，从根上避免人声重叠）
+NARRATOR_VOICE = "zh-CN-XiaoyiNeural"         # 第三人称解说（女，温暖自然，类似豆包）
+NARRATOR_VOICE_MONO = "zh-CN-XiaoxiaoNeural"  # 主角第一人称独白（女，知性）
+# TTS 相邻句之间的最小停顿（秒）：顺序排布时留出气口，进一步杜绝重叠
+TTS_GAP = 0.3
+# 解说模式相邻句之间的呼吸间隙（秒）：解说应连续不断，仅留极小气口
+NARRATION_GAP = 0.15
+
 # 角色语音缓存：确保同一角色始终用同一语音
 _character_voice_map: dict[str, str] = {}
 
@@ -1193,7 +1216,8 @@ def _composition_timeline(script: dict, vid_manifest: dict,
 def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
                  scene_duration: int = 5,
                  vid_manifest: dict | None = None,
-                 checkpoint_key: str = "tts") -> dict:
+                 checkpoint_key: str = "tts",
+                 mode: str = "dialogue", monologue: bool = False) -> dict:
     """为剧本对白生成 TTS 音频。优先 edge-tts（跨平台），回退到 macOS say。
 
     vid_manifest: 实际存在的视频清单，用于精确对齐 TTS 时间戳。
@@ -1277,6 +1301,10 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
     manifest = {}
     idx = 0
 
+    # 全局顺序累计游标：跨场景连续排布，从根上杜绝相邻人声重叠。
+    # 每句旁白起始 = max(本场景起始, 上一句结束+停顿)，既贴合画面又不重叠。
+    cursor = 0.0
+
     for sid, dialogues in scene_dialogues.items():
         if not dialogues:
             continue
@@ -1288,8 +1316,6 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
         else:
             actual_duration = float(scene_duration)
 
-        per_dialogue = actual_duration / max(len(dialogues), 1)
-
         for d_idx, d in enumerate(dialogues):
             char_id = d.get("character", "")
             text = d.get("text", "")
@@ -1297,25 +1323,39 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
             if not text:
                 continue
 
-            # 查找角色信息
+            # 角色信息 / 旁白声
             char_name = char_id
             char_gender = "male"
-            for c in script.get("characters", []):
-                if c["id"] == char_id:
-                    char_name = c["name"]
-                    visual = c.get("visual", "").lower()
-                    if any(w in visual for w in ["女", "娘", "姑", "妃", "姬", "婉", "柔"]):
-                        char_gender = "female"
-                    break
+            if char_id == "N":
+                # 解说 / 独白声轨：单一声线，从根上避免多角色人声打架
+                char_name = "独白" if monologue else "解说"
+                char_gender = "female"
+            else:
+                for c in script.get("characters", []):
+                    if c["id"] == char_id:
+                        char_name = c["name"]
+                        visual = c.get("visual", "").lower()
+                        if any(w in visual for w in ["女", "娘", "姑", "妃", "姬", "婉", "柔"]):
+                            char_gender = "female"
+                        break
 
             out_path = audio_dir / f"tts_{orig_sid}_{d_idx:02d}.mp3"
 
-            # 计算时间戳：基于实际视频拼接位置
-            start_time = scene_start + d_idx * per_dialogue
+            # 时间戳
+            if mode == "narration":
+                # 解说模式：连续不断，上一句结束后仅留极小呼吸间隙即接下一句，
+                # 从 0 秒一直铺到结尾，不等待场景开始、不在句中留长空白
+                start_time = cursor
+            else:
+                # 对白模式：max(本场景起始, 上一句结束+停顿)，贴画面且跨场景不重叠
+                start_time = max(scene_start, cursor)
 
-            # 选择语音：每个角色用不同声音
+            # 选择语音
             if tts_engine == "edge-tts":
-                voice = _get_voice_for_character(char_id, char_gender)
+                if char_id == "N":
+                    voice = NARRATOR_VOICE_MONO if monologue else NARRATOR_VOICE
+                else:
+                    voice = _get_voice_for_character(char_id, char_gender)
                 success = _run_edge_tts(text, voice, out_path)
             elif tts_engine == "say":
                 voice = "Ting-Ting" if char_gender == "female" else "Li-Mu"
@@ -1333,6 +1373,9 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
             if success and out_path.exists():
                 # 获取 TTS 实际时长
                 tts_duration = get_audio_duration(out_path)
+                # 推进 cursor，确保下一句在"本句结束 + 停顿"之后，绝不重叠
+                gap = NARRATION_GAP if mode == "narration" else TTS_GAP
+                cursor = start_time + tts_duration + gap
                 manifest[f"{sid}_{d_idx}"] = {
                     "path": str(out_path),
                     "character": char_name,
@@ -1342,7 +1385,7 @@ def generate_tts(script: dict, audio_dir: pathlib.Path, cp: Checkpoint,
                     "text": text,
                     "start": round(start_time, 3),
                     "tts_duration": round(tts_duration, 3),
-                    "scene_duration": round(per_dialogue, 3),
+                    "scene_duration": round(tts_duration + TTS_GAP, 3),
                 }
                 print(f"  ✅ {char_name}({voice.split('_')[-1].replace('Neural','')}): {text[:20]}... [{start_time:.1f}s]")
                 idx += 1
@@ -2159,6 +2202,10 @@ def main():
     parser.add_argument("--output", default=None, help="输出目录")
     parser.add_argument("--no-tts", action="store_true", help="禁用 TTS 配音")
     parser.add_argument("--no-sfx", action="store_true", help="禁用音效")
+    parser.add_argument("--mode", choices=["dialogue", "narration"], default="dialogue",
+                        help="dialogue=角色对白模式；narration=单一旁白/独白解说漫剧模式（杜绝人声重叠，强调故事连贯）")
+    parser.add_argument("--monologue", action="store_true",
+                        help="仅 narraion 模式有效：用主角第一人称独白而非第三人称解说")
     args = parser.parse_args()
 
     n_scenes = args.duration // args.scene_duration
@@ -2189,7 +2236,19 @@ def main():
         client, args.theme, args.style, args.genre,
         n_scenes, args.scene_duration, rl,
         project_dir / "script.json", cp,
+        mode=args.mode, monologue=args.monologue,
     )
+
+    # 解说 / 独白模式：把 narration 折叠成单一旁白角色 "N" 的对白，
+    # 复用下游 TTS / SRT 流程；角色对白清空，从根上避免多声线重叠。
+    if args.mode == "narration":
+        for scene in script.get("scenes", []):
+            narr = (scene.get("narration") or "").strip()
+            if narr:
+                scene["dialogue"] = [{"character": "N", "text": narr}]
+            else:
+                scene["dialogue"] = []
+        print(f"  🎙️ 解说漫剧模式：已折叠 {sum(1 for s in script['scenes'] if s.get('dialogue'))} 句旁白声轨")
 
     # Step 2: 角色卡
     char_manifest = generate_characters(
@@ -2222,6 +2281,7 @@ def main():
             script, project_dir / "audio", cp,
             scene_duration=args.scene_duration,
             vid_manifest=vid_manifest,
+            mode=args.mode, monologue=args.monologue,
         )
     else:
         print("\n🎙️ TTS 配音已禁用")
@@ -2234,9 +2294,9 @@ def main():
                      vid_manifest=vid_manifest, tts_manifest=tts_manifest)
         print(f"  🔤 字幕已按配音时长对齐（{len(tts_manifest)} 条）")
 
-    # Step 6.5: 口型同步
+    # Step 6.5: 口型同步（解说漫剧为纯旁白声轨，无需对口型，跳过）
     lipsync_manifest = {}
-    if not args.no_tts and tts_manifest:
+    if not args.no_tts and tts_manifest and args.mode != "narration":
         lipsync_manifest = generate_lipsync(
             project_dir, script, tts_manifest, vid_manifest, cp,
             scene_duration=args.scene_duration,

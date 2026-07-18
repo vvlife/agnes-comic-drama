@@ -145,11 +145,18 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
 .lf-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
 .lf-desc { font-size: 13px; color: var(--text2); line-height: 1.5; }
 /* 示例作品 */
-.landing-examples { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
-.landing-example { background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+/* 示例作品：用 flex 而非 grid，避免末行单个卡片被 1fr 拉伸满宽 */
+.landing-examples { display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; }
+.landing-example { flex: 1 1 260px; max-width: 340px; position: relative;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
   overflow: hidden; cursor: pointer; transition: .18s; }
 .landing-example:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: 0 8px 26px var(--glow); }
 .landing-example video { width: 100%; display: block; aspect-ratio: 20/11; object-fit: cover; background: #000; }
+/* 视频未就绪（如生成中 404）时显示占位，避免黑屏像"坏了" */
+.landing-example.video-broken video { visibility: hidden; }
+.landing-example.video-broken::after { content: "示例生成中…"; position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center; color: var(--text3);
+  font-size: 14px; background: linear-gradient(135deg, #1a1d29, #232735); }
 .le-info { display: flex; align-items: center; gap: 8px; padding: 12px 14px; }
 .le-ic { font-size: 18px; }
 .le-title { font-size: 15px; font-weight: 600; flex: 1; }
@@ -1755,7 +1762,7 @@ const EXAMPLES = [
   { theme:"社畜周报封印魔尊", file:"ex_excel-shen.mp4" },
   { theme:"少女穿越画中世界", file:"ex_painting-world.mp4" },
   { theme:"最后武林大会",     file:"ex_martial-meet.mp4" },
-  { theme:"三界外卖奇遇",     file:"ex_takeout.mp4" },
+  { theme:"三界外卖奇遇（解说版）", file:"ex_takeout.mp4" },
 ];
 function renderExamples(){
   const box=document.getElementById('landing-examples');
@@ -1764,7 +1771,8 @@ function renderExamples(){
   box.innerHTML=EXAMPLES.map(e=>{
     const url=base+e.file;
     return '<div class="landing-example">'+
-      '<video src="'+url+'" controls preload="metadata" muted playsinline></video>'+
+      '<video src="'+url+'" controls preload="metadata" muted playsinline'+
+      ' onerror="this.closest(\'.landing-example\').classList.add(\'video-broken\')"></video>'+
       '<div class="le-info"><span class="le-ic">🎬</span><span class="le-title">'+esc(e.theme)+'</span>'+
       '<a class="le-go" href="'+url+'" target="_blank" rel="noopener">▶ 完整</a></div></div>';
   }).join('');
