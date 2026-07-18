@@ -469,6 +469,8 @@ def generate_characters(client: AgnesClient, script: dict, style: str,
         print(f"  生成角色 {char['name']}（{cid}）...")
 
         # 每种图一张——全身 / 半身特写 / Q版
+        # 关键：先生成 full 立绘（文生图），再以 full 为参考图生图生成 close/chibi，
+        # 保证同一角色的三视图外观严格一致（发型/服饰/五官锁定），提升跨片段一致性。
         prompts = {
             "full": (
                 f"{style_prefix}，角色全身立绘设定图，{char['visual']}，"
@@ -490,12 +492,25 @@ def generate_characters(client: AgnesClient, script: dict, style: str,
         }
 
         char_images = []
+        full_path = None
+        # 若 full 已存在，加载为后续 close/chibi 的参考基准（支持断点续跑）
+        existing_full = char_dir / f"{cid}_full.png"
+        if existing_full.exists():
+            full_path = existing_full
+
         for img_type, prompt in prompts.items():
             out_path = char_dir / f"{cid}_{img_type}.png"
             if out_path.exists():
                 print(f"    {img_type} 已存在，跳过")
                 char_images.append(str(out_path))
+                if img_type == "full":
+                    full_path = out_path
                 continue
+
+            # close / chibi 以 full 立绘作为参考图（图生图），锁定同一角色外观
+            ref = None
+            if img_type != "full" and full_path is not None and full_path.exists():
+                ref = [str(full_path)]
 
             rate_limiter.wait()
             try:
@@ -503,9 +518,12 @@ def generate_characters(client: AgnesClient, script: dict, style: str,
                     prompt=prompt,
                     out_path=out_path,
                     size=IMAGE_SIZES["landscape"],
+                    reference_images=ref,
                     response_format="url",
                 )
                 char_images.append(str(out_path))
+                if img_type == "full":
+                    full_path = out_path
                 print(f"    ✅ {img_type}")
             except Exception as e:
                 print(f"    ❌ {img_type} 失败：{e}")
@@ -551,12 +569,33 @@ def generate_storyboard(client: AgnesClient, script: dict, style: str,
             manifest[sid] = {"path": str(out_path), "prompt": ""}
             continue
 
-        # 构建提示词——层次化：风格→环境→主体→站位→镜头→氛围→品质
         quality_tags = style_info.get("quality", "masterpiece, best quality")
         negative_tags = style_info.get("negative", "")
         avoid_hint = f" avoid: {negative_tags}" if negative_tags else ""
         blocking = scene.get("blocking", "")
         visual = scene.get("visual", "")
+
+        # 收集该镜出场角色的参考图（优先全身立绘），用于锁定角色外观一致性
+        ref_images = []
+        for cid in scene.get("characters", []):
+            if cid in char_manifest:
+                imgs = char_manifest[cid].get("images", [])
+                for img in imgs:
+                    if "full" in img:
+                        ref_images.append(img)
+                        break
+                if len(ref_images) >= 4:
+                    break
+
+        # 角色一致性约束：画面中角色外观必须与参考图严格一致
+        consistency_hint = ""
+        if ref_images:
+            consistency_hint = (
+                "，画面中角色外观必须与参考图严格一致，"
+                "发型、服饰、五官与配色不得改变，保持同一角色形象"
+            )
+
+        # 构建提示词——层次化：风格→环境→主体→站位→镜头→氛围→品质
         prompt = (
             f"{style_info['prefix']}，"
             f"场景：{scene['location']}，{scene['time']}，"
@@ -566,22 +605,9 @@ def generate_storyboard(client: AgnesClient, script: dict, style: str,
             f"镜头语言：{scene['camera']}，"
             f"景深层次，前中后景分明，"
             f"{scene['mood']}氛围，{style_info['lighting']}，{style_info['palette']}，"
-            f"cinematic composition，dramatic lighting，{quality_tags}{avoid_hint}"
+            f"cinematic composition，dramatic lighting"
+            f"{consistency_hint}，{quality_tags}{avoid_hint}"
         )
-
-        # 收集该镜出场角色的参考图
-        ref_images = []
-        for cid in scene.get("characters", []):
-            if cid in char_manifest:
-                imgs = char_manifest[cid].get("images", [])
-                # 优先取全身立绘
-                for img in imgs:
-                    if "full" in img:
-                        ref_images.append(img)
-                        break
-                # 最多 4 张参考图
-                if len(ref_images) >= 4:
-                    break
 
         rate_limiter.wait()
         try:
@@ -674,6 +700,8 @@ def generate_videos(client: AgnesClient, script: dict, sb_manifest: dict,
             f"人物站位与构图：{blocking}，{camera}，"
             f"smooth fluid motion，natural character movement，"
             f"hair and clothing dynamics，environmental particle effects，"
+            f"keep the character's appearance strictly identical to the reference frame: "
+            f"same hairstyle, outfit, and facial features,"
             f"{mood}氛围，{location}，"
             f"cinematic animation，professional quality，{quality_tags}"
         )
