@@ -144,6 +144,16 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
 .lf-ic { font-size: 32px; margin-bottom: 12px; }
 .lf-title { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
 .lf-desc { font-size: 13px; color: var(--text2); line-height: 1.5; }
+/* 示例作品 */
+.landing-examples { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+.landing-example { background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  overflow: hidden; cursor: pointer; transition: .18s; }
+.landing-example:hover { border-color: var(--accent); transform: translateY(-3px); box-shadow: 0 8px 26px var(--glow); }
+.landing-example video { width: 100%; display: block; aspect-ratio: 9/16; object-fit: cover; background: #000; }
+.le-info { display: flex; align-items: center; gap: 8px; padding: 12px 14px; }
+.le-ic { font-size: 18px; }
+.le-title { font-size: 15px; font-weight: 600; flex: 1; }
+.le-go { color: var(--text3); font-size: 13px; }
 .landing-recent { display: flex; flex-direction: column; gap: 10px; }
 .landing-recent-item { display: flex; align-items: center; gap: 14px; background: var(--surface);
   border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; cursor: pointer; transition: .15s; }
@@ -500,6 +510,9 @@ header p { color: var(--text2); margin-top: 6px; font-size: 14px; }
     <div id="landing-recent" class="landing-recent">
       <div class="landing-recent-loading">加载中…</div>
     </div>
+
+    <div class="landing-section-title">示例作品</div>
+    <div id="landing-examples" class="landing-examples"></div>
   </section>
 
   <!-- ===== Workspace (进入项目后显示) ===== -->
@@ -1734,6 +1747,28 @@ function enterEditor(){
 function esc(s){
   return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
+// ===== 示例作品展示 =====
+const EXAMPLES = [
+  { theme:"少年剑仙三年归来", file:"ex_sword-return.mp4" },
+  { theme:"深宫妃子博弈",     file:"ex_palace.mp4" },
+  { theme:"暴雨夜客栈",       file:"ex_rainy-inn.mp4" },
+  { theme:"社畜周报封印魔尊", file:"ex_excel-shen.mp4" },
+  { theme:"少女穿越画中世界", file:"ex_painting-world.mp4" },
+  { theme:"最后武林大会",     file:"ex_martial-meet.mp4" },
+];
+function renderExamples(){
+  const box=document.getElementById('landing-examples');
+  if(!box) return;
+  const base=location.origin+'/videos/';
+  box.innerHTML=EXAMPLES.map(e=>{
+    const url=base+e.file;
+    return '<div class="landing-example">'+
+      '<video src="'+url+'" controls preload="metadata" muted playsinline></video>'+
+      '<div class="le-info"><span class="le-ic">🎬</span><span class="le-title">'+esc(e.theme)+'</span>'+
+      '<a class="le-go" href="'+url+'" target="_blank" rel="noopener">▶ 完整</a></div></div>';
+  }).join('');
+}
+
 function loadRecentProjects(){
   const box=document.getElementById('landing-recent');
   if(!box) return;
@@ -1761,6 +1796,7 @@ function handleHash(){
 }
 document.addEventListener('DOMContentLoaded', () => {
   onScriptParamChange();
+  renderExamples();
   const wantP=new URLSearchParams(location.search).get('project');
   api('/api/projects').then(data => {
     const ps=data.projects||[];

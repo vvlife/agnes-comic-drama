@@ -15,7 +15,7 @@
   var SB_CONFIG = {
     groups: [
       { title: "漫剧生成器", items: [
-        { id:"gen-home", scope:"gen", icon:"🏠", label:"生成器首页", hash:"" },
+        { id:"gen-home", scope:"gen", icon:"🏠", label:"首页", hash:"" },
         { id:"tab0",     scope:"gen", icon:"📝", label:"脚本创作",   tab:0, hash:"tab0" },
         { id:"tab1",     scope:"gen", icon:"🎨", label:"角色卡",     tab:1, hash:"tab1" },
         { id:"tab2",     scope:"gen", icon:"🖼️", label:"分镜与视频", tab:2, hash:"tab2" },
