@@ -1596,6 +1596,19 @@ def api_serve_static_video(filename: str):
     return send_file(target)
 
 
+@app.route("/videos/<filename>", methods=["GET"])
+def serve_public_video(filename: str):
+    """Serve example videos from public/videos/ (works when running Flask locally;
+    on Vercel this path is handled by static hosting before reaching the function)."""
+    vid_dir = API_DIR.parent / "public" / "videos"
+    target = (vid_dir / filename).resolve()
+    if not str(target).startswith(str(vid_dir.resolve())):
+        return jsonify({"error": "非法路径"}), 403
+    if not target.exists():
+        return jsonify({"error": "文件不存在"}), 404
+    return send_file(target)
+
+
 @app.route("/api/jobs", methods=["GET"])
 def api_list_jobs():
     return jsonify({

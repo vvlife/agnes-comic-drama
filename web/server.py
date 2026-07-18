@@ -1223,6 +1223,19 @@ def sidebar_js():
     return resp
 
 
+@app.route("/videos/<filename>")
+def serve_example_video(filename: str):
+    """示例作品视频（public/videos/）。本地直接由 Flask 托管；
+    线上由 Vercel 静态目录优先命中，不会走到此路由。"""
+    vid_dir = (PUBLIC_DIR / "videos").resolve()
+    target = (vid_dir / filename).resolve()
+    if not str(target).startswith(str(vid_dir)):
+        return jsonify({"error": "非法路径"}), 403
+    if not target.exists():
+        return jsonify({"error": "文件不存在"}), 404
+    return send_file(target)
+
+
 @app.route("/api/projects/<project_id>/edit/scenes", methods=["GET"])
 def api_edit_scenes(project_id: str):
     """列出可用于剪辑的场景：时长、视频/分镜 URL、对白、站位等。"""
