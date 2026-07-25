@@ -86,6 +86,9 @@
     var page = curPage();
     var collapsed = (localStorage.getItem("sb-collapsed")==="1");
     if(collapsed) document.body.classList.add("nav-collapsed");
+    // 恢复主题
+    var savedTheme = localStorage.getItem("ui-theme");
+    if(savedTheme === "light") document.body.classList.add("light");
 
     var html = '<nav class="sidebar'+(collapsed?" collapsed":"")+'" id="sb-root">';
     html += '<div class="brand"><span class="lg">🎭</span><span class="lbl">Agnes 漫剧</span></div>';
@@ -96,9 +99,14 @@
       for(var i=0; i<items.length; i++){ html += itemHtml(items[i], page); }
     }
     html += '</div>';
-    html += '<div class="nav-foot"><button class="nav-toggle" id="sb-toggle">'+
+    html += '<div class="nav-foot">'+
+            '<button class="nav-toggle" id="sb-theme" title="切换白天/黑暗模式">'+
+            '<span class="ic" id="sb-theme-ic">'+(savedTheme==="light"?"☀️":"🌙")+'</span>'+
+            '<span class="lbl" id="sb-theme-lbl">'+(savedTheme==="light"?"白天":"黑暗")+'</span></button>'+
+            '<button class="nav-toggle" id="sb-toggle">'+
             '<span class="ic" id="sb-toggle-ic">'+(collapsed?"⟩":"⟨")+'</span>'+
-            '<span class="lbl">'+(collapsed?"展开":"收起")+'</span></button></div>';
+            '<span class="lbl">'+(collapsed?"展开":"收起")+'</span></button>'+
+            '</div>';
     html += '</nav>';
 
     document.body.insertAdjacentHTML("afterbegin", html);
@@ -122,6 +130,8 @@
     }
     var tg = document.getElementById("sb-toggle");
     if(tg) tg.addEventListener("click", toggleSidebar);
+    var th = document.getElementById("sb-theme");
+    if(th) th.addEventListener("click", toggleTheme);
 
     // 当前在编辑器页时，高亮「剪辑器」父节点
     if(page==="editor"){
@@ -175,6 +185,15 @@
     var lbl = document.querySelector("#sb-toggle .lbl");
     if(ic) ic.textContent = collapsed?"⟩":"⟨";
     if(lbl) lbl.textContent = collapsed?"展开":"收起";
+  }
+
+  function toggleTheme(){
+    var isLight = document.body.classList.toggle("light");
+    localStorage.setItem("ui-theme", isLight?"light":"dark");
+    var ic = document.getElementById("sb-theme-ic");
+    var lbl = document.getElementById("sb-theme-lbl");
+    if(ic) ic.textContent = isLight?"☀️":"🌙";
+    if(lbl) lbl.textContent = isLight?"白天":"黑暗";
   }
 
   if(document.readyState!=="loading") initSidebar();

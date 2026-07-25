@@ -1205,6 +1205,15 @@ def result_page():
     return resp
 
 
+@app.route("/theme.css")
+def theme_css():
+    """统一设计系统样式。"""
+    data = (PUBLIC_DIR / "theme.css").read_bytes()
+    resp = Response(data, mimetype="text/css; charset=utf-8")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    return resp
+
+
 @app.route("/sidebar.css")
 def sidebar_css():
     """统一左侧菜单栏样式组件。"""
@@ -1230,6 +1239,18 @@ def serve_example_video(filename: str):
     vid_dir = (PUBLIC_DIR / "videos").resolve()
     target = (vid_dir / filename).resolve()
     if not str(target).startswith(str(vid_dir)):
+        return jsonify({"error": "非法路径"}), 403
+    if not target.exists():
+        return jsonify({"error": "文件不存在"}), 404
+    return send_file(target)
+
+
+@app.route("/music/<filename>")
+def serve_builtin_music(filename: str):
+    """内置音乐（public/music/）。"""
+    music_dir = (PUBLIC_DIR / "music").resolve()
+    target = (music_dir / filename).resolve()
+    if not str(target).startswith(str(music_dir)):
         return jsonify({"error": "非法路径"}), 403
     if not target.exists():
         return jsonify({"error": "文件不存在"}), 404
@@ -1546,6 +1567,68 @@ def api_edit_music_upload(project_id: str):
         "path": f"music/{fn}",
         "url": f"/api/project-files/{project_id}/music/{fn}",
         "filename": fn,
+    })
+
+
+@app.route("/api/projects/<project_id>/edit/dialogue", methods=["POST"])
+def api_edit_dialogue(project_id: str):
+    """更新指定场景的对白/字幕，持久化到 script.json。"""
+    p = validate_project(project_id)
+    if not p:
+        return jsonify({"error": "项目不存在"}), 404
+    script = load_script(p)
+    if not script:
+        return jsonify({"error": "脚本不存在"}), 404
+    body = request.get_json(force=True, silent=True) or {}
+    sid = body.get("sid")
+    dialogue = body.get("dialogue")
+    if not sid or not isinstance(dialogue, list):
+        return jsonify({"error": "参数不完整"}), 400
+    scenes = script.get("scenes", [])
+    scene = next((s for s in scenes if s.get("id") == sid), None)
+    if not scene:
+        return jsonify({"error": "场景不存在"}), 404
+    # 清洗对白数据
+    cleaned = []
+    for d in dialogue[:12]:
+        if not isinstance(d, dict):
+            continue
+        text = str(d.get("text") or "").strip()
+        if not text:
+            continue
+        char = str(d.get("character") or "").strip()
+        cleaned.append({"character": char, "text": text})
+    scene["dialogue"] = cleaned
+    save_script(p, script)
+    return jsonify({"ok": True, "dialogue": cleaned})
+
+
+@app.route("/api/projects/<project_id>/edit/music/builtin", methods=["POST"])
+def api_edit_music_builtin(project_id: str):
+    """把 public/music/ 下的内置音乐复制到项目 music/ 目录。"""
+    p = validate_project(project_id)
+    if not p:
+        return jsonify({"error": "项目不存在"}), 404
+    body = request.get_json(force=True, silent=True) or {}
+    filename = body.get("filename")
+    if not filename or not isinstance(filename, str):
+        return jsonify({"error": "缺少 filename"}), 400
+    # 只允许安全的内置文件名
+    safe = secure_filename(filename)
+    if safe != filename or not filename.startswith("builtin-") or not filename.endswith(".mp3"):
+        return jsonify({"error": "非法内置音乐文件名"}), 400
+    src = PUBLIC_DIR / "music" / filename
+    if not src.exists():
+        return jsonify({"error": "内置音乐不存在"}), 404
+    music_dir = p / "music"
+    music_dir.mkdir(parents=True, exist_ok=True)
+    dst = music_dir / filename
+    shutil.copy2(src, dst)
+    return jsonify({
+        "ok": True,
+        "path": f"music/{filename}",
+        "url": f"/api/project-files/{project_id}/music/{filename}",
+        "filename": filename,
     })
 
 

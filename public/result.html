@@ -4,61 +4,80 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🎉 剪辑成片 · Agnes 漫剧</title>
-<style>
-:root{
-  --bg:#0c0d12; --panel:#14151c; --panel2:#1b1d27; --panel3:#242736;
-  --border:#2c2f3d; --text:#e9eaf2; --text2:#8b8fa3; --text3:#565a70;
-  --accent:#7c6cff; --accent2:#a99bff; --ok:#2ecc8f; --err:#ff6b6b;
-  --glow:rgba(124,108,255,.28);
-  --sbw:214px;
-}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:-apple-system,'SF Pro','Helvetica Neue',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-left:var(--sbw);transition:padding-left .18s}
-body.nav-collapsed{padding-left:66px}
-a{color:var(--accent2);text-decoration:none}
-button{cursor:pointer;border:none;border-radius:7px;font-size:13px;font-family:inherit;transition:.15s}
-button:disabled{opacity:.4;cursor:not-allowed}
-input,select{background:var(--panel2);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 8px;font-size:13px;outline:none}
-input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--glow)}
-.app{max-width:980px;margin:0 auto;padding:28px 24px 60px}
-header{display:flex;align-items:center;gap:12px;padding:6px 0 18px}
-header h1{font-size:22px;font-weight:800;background:linear-gradient(135deg,var(--accent2),var(--accent),var(--ok));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-header .spacer{flex:1}
-.btn-primary{background:var(--accent);color:#fff;padding:10px 18px;font-weight:600}
-.btn-primary:hover{background:var(--accent2)}
-.btn-ghost{background:var(--panel2);color:var(--text);padding:9px 14px;border:1px solid var(--border);display:inline-flex;align-items:center;gap:6px}
-.btn-ghost:hover{background:var(--panel3)}
-
-.card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:22px}
-.badge{display:inline-flex;align-items:center;gap:8px;background:rgba(46,204,143,.12);color:var(--ok);
-  border:1px solid rgba(46,204,143,.3);border-radius:999px;padding:6px 14px;font-size:13px;font-weight:600;margin-bottom:16px}
-.badge .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 4px rgba(46,204,143,.18)}
-.result-video{width:100%;max-height:520px;border-radius:12px;background:#000;display:block}
-.row{margin-top:16px;display:flex;gap:12px;flex-wrap:wrap}
-.meta{margin-top:18px;display:flex;flex-direction:column;gap:10px}
-.meta-row{display:flex;gap:10px;font-size:13px;color:var(--text2)}
-.meta-row .k{width:84px;color:var(--text3);flex-shrink:0}
-.meta-row .v{color:var(--text);word-break:break-all}
-.empty{text-align:center;padding:80px 20px;color:var(--text2)}
-.empty .ic{font-size:48px;margin-bottom:14px}
-</style>
+<link rel="stylesheet" href="/theme.css">
 <link rel="stylesheet" href="/sidebar.css">
+<style>
+.app{max-width:980px;margin:0 auto;padding:32px 24px 64px}
+
+/* 页头 */
+header{display:flex;align-items:center;gap:12px;padding:6px 0 22px}
+header h1{font-size:24px;font-weight:800;letter-spacing:.3px}
+header .spacer{flex:1}
+
+/* 进入动画（复用 theme.css 的 @keyframes fadeIn） */
+.enter{animation:fadeIn var(--transition-slow) both}
+.enter-delay{animation-delay:.1s}
+
+/* 成功徽章：大尺寸 pill + 脉冲光晕圆点 */
+.success-pill{display:inline-flex;align-items:center;gap:10px;background:var(--success-bg);color:var(--success);
+  border:1px solid rgba(46,204,143,.32);border-radius:999px;padding:10px 22px;font-size:15px;font-weight:700;
+  margin-bottom:18px;box-shadow:0 0 24px rgba(46,204,143,.1)}
+.success-pill .dot{width:10px;height:10px;border-radius:50%;background:var(--success);flex-shrink:0;
+  animation:dotPulse 1.8s ease-out infinite}
+@keyframes dotPulse{
+  0%{box-shadow:0 0 0 0 rgba(46,204,143,.45)}
+  70%{box-shadow:0 0 0 10px rgba(46,204,143,0)}
+  100%{box-shadow:0 0 0 0 rgba(46,204,143,0)}
+}
+
+/* 视频容器：电影感暗角 + 圆角边框 + 悬浮光晕 */
+.video-stage{position:relative;border-radius:var(--radius-lg);overflow:hidden;
+  border:1px solid var(--border-strong);background:#000;box-shadow:var(--shadow-lg);
+  transition:box-shadow var(--transition-base),border-color var(--transition-base)}
+.video-stage:hover{box-shadow:var(--shadow-glow);border-color:var(--accent)}
+.video-stage::after{content:'';position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.45) 100%)}
+.result-video{width:100%;max-height:520px;display:block;background:#000}
+
+/* 操作按钮组 */
+.row{margin-top:18px;display:flex;gap:12px;flex-wrap:wrap}
+.row .btn-primary,.row .btn-ghost{display:inline-flex;align-items:center;gap:8px}
+.row svg{flex-shrink:0}
+
+/* 元数据：键值对卡片 */
+.meta{margin-top:20px;background:var(--surface-2);border:1px solid var(--border);
+  border-radius:var(--radius-md);padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.meta-row{display:flex;gap:12px;font-size:13px}
+.meta-row .k{width:56px;color:var(--text-muted);flex-shrink:0}
+.meta-row .v{color:var(--text-primary);word-break:break-all}
+
+/* 空状态 */
+.empty .btn-primary{margin-top:6px}
+</style>
 </head>
 <body>
 <div class="app">
   <header>
-    <h1>🎉 剪辑成片</h1>
+    <h1>🎉 <span class="text-gradient">剪辑成片</span></h1>
     <div class="spacer"></div>
     <button class="btn-ghost" onclick="backToEditor()">✂️ 返回剪辑器</button>
     <button class="btn-primary" onclick="location.href='/'">🎭 生成器首页</button>
   </header>
 
-  <div id="ok" class="card" style="display:none">
-    <div class="badge"><span class="dot"></span>导出已完成，这是你的专属漫剧成片</div>
-    <video id="resultVideo" class="result-video" controls></video>
+  <div id="ok" class="card enter" style="display:none">
+    <div class="success-pill"><span class="dot"></span>导出已完成</div>
+    <div class="video-stage enter-delay">
+      <video id="resultVideo" class="result-video" controls></video>
+    </div>
     <div class="row">
-      <a id="resultDl" class="btn-ghost" download>⬇️ 下载成片</a>
-      <button class="btn-ghost" onclick="copyPreview()">🔗 复制预览链接</button>
+      <a id="resultDl" class="btn-primary" download>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        下载成片
+      </a>
+      <button class="btn-ghost" onclick="copyPreview()">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        复制预览链接
+      </button>
     </div>
     <div class="meta">
       <div class="meta-row"><span class="k">项目</span><span class="v" id="mProject">—</span></div>
@@ -66,10 +85,10 @@ header .spacer{flex:1}
     </div>
   </div>
 
-  <div id="none" class="empty" style="display:none">
-    <div class="ic">🤔</div>
+  <div id="none" class="empty enter" style="display:none">
+    <div class="empty-icon">🤔</div>
     <p>没有找到成片文件。</p>
-    <button class="btn-primary" style="margin-top:14px" onclick="location.href='/'">打开生成器</button>
+    <button class="btn-primary" onclick="location.href='/'">🎭 打开生成器</button>
   </div>
 </div>
 
