@@ -22,7 +22,7 @@ header{display:flex;align-items:center;gap:12px;padding:4px 0 16px}
 header h1{font-size:22px;font-weight:800;letter-spacing:.3px;background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;filter:drop-shadow(0 0 16px rgba(124,108,255,.28))}
 header .spacer{flex:1}
 
-.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:rgba(17,17,24,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+.toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--toolbar-bg);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   border:1px solid var(--border);border-radius:var(--radius-lg);padding:10px 14px;margin-bottom:14px;position:sticky;top:8px;z-index:40;box-shadow:var(--shadow-md)}
 .toolbar .grow{flex:1}
 .tb-group{display:flex;align-items:center;gap:8px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-md);padding:5px 10px}
@@ -66,6 +66,7 @@ header .spacer{flex:1}
   background:#0a0b11;border:2px solid transparent;transition:border-color var(--transition-fast),box-shadow var(--transition-fast),filter var(--transition-fast)}
 .clip:hover{border-color:var(--accent-2)}
 .clip.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow),0 6px 18px rgba(124,108,255,.28);filter:brightness(1.1)}
+.clip.playing{border-color:var(--accent-2);box-shadow:0 0 0 2px var(--accent-glow),0 0 18px var(--accent-2);filter:brightness(1.18)}
 .clip.disabled{opacity:.45;filter:grayscale(.6)}
 .clip .ghost{position:absolute;inset:0;opacity:.32}
 .clip .ghost img{width:100%;height:100%;object-fit:cover;opacity:.55}
@@ -80,6 +81,7 @@ header .spacer{flex:1}
   border:1px solid rgba(255,255,255,.12);transition:border-color var(--transition-fast),box-shadow var(--transition-fast)}
 .audio-clip:hover{border-color:var(--accent-2)}
 .audio-clip.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-glow),0 4px 14px rgba(124,108,255,.25)}
+.audio-clip.playing{border-color:var(--accent-2);box-shadow:0 0 0 2px var(--accent-glow),0 0 14px var(--accent-2)}
 .audio-clip.disabled{opacity:.45}
 .audio-clip .crop-win{background-image:repeating-linear-gradient(90deg,rgba(255,255,255,.30) 0 2px,transparent 2px 5px);border-left:2px solid var(--accent);border-right:2px solid var(--accent);box-shadow:0 0 0 1px rgba(0,0,0,.4)}
 .audio-clip .cap{position:absolute;left:6px;top:5px;font-size:9px;color:#fff;font-weight:700;text-shadow:0 1px 2px #000;white-space:nowrap;z-index:3}
@@ -547,13 +549,13 @@ function renderTimeline(){
     }else{html+=`<span class="hint">无素材</span>`;}
     html+=`</div></div><div class="track-body">`;
     if(avail){
-      order.forEach(sid=>{
+      order.forEach((sid,i)=>{
         const st=key==='tts'?tState[sid]:aState[sid];
         const od=(origScenes.find(x=>x.sid===sid)||{}).duration||5;
         const w=Math.max(4,(st.out-st.in)*pps);
         const on=en&&st.enabled;
         const selc=(sel&&sel.track===key&&sel.sid===sid)?'sel':'';
-        html+=`<div class="audio-clip ${on?'':'disabled'} ${selc}" style="width:${w}px" onclick="selClip('${key}','${sid}')">
+        html+=`<div class="audio-clip ${on?'':'disabled'} ${selc}" data-i="${i}" style="width:${w}px" onclick="selClip('${key}','${sid}')">
           <canvas class="wf" data-kind="${key}" data-sid="${sid}" data-od="${od}" data-in="${st.in}" data-out="${st.out>0?st.out:od}"></canvas>
           <span class="cap">${cap}</span>
           <div class="trim l" title="拖拽裁剪入点" onmousedown="startTrim(event,'${key}','${sid}','l')"></div>
@@ -1066,17 +1068,24 @@ function stopMusic(){
 
 function playPreview(){
   if(pv.playing){pausePreview();return;}
-  pv.segs=buildPreviewSegs();
-  pv.idx=0;pv.curT=pv.segs.length?pv.segs[0].in:0;
+  if(!pv.segs.length)pv.segs=buildPreviewSegs();
+  if(!pv.segs.length)return;
+  // 从当前播放头位置开始；若位置无效则回到第一段开头
+  if(pv.idx==null||pv.idx<0||pv.idx>=pv.segs.length)pv.idx=0;
+  const seg=pv.segs[pv.idx];
+  if(pv.curT==null||pv.curT<seg.in||pv.curT>=seg.out)pv.curT=seg.in;
   pv._capIdx=-1;
   pv.playing=true;
   document.getElementById('pvPlay').textContent='⏸ 暂停';
-  loadSeg(0,pv.curT);
+  loadSeg(pv.idx,pv.curT);
   pv.raf=requestAnimationFrame(pvTick);
 }
 function loadSeg(i,fromT){
   const seg=pv.segs[i];if(!seg)return;
   pv.idx=i;pv.curT=fromT!=null?fromT:seg.in;
+  // 高亮当前播放的片段
+  document.querySelectorAll('.clip.playing,.audio-clip.playing').forEach(el=>el.classList.remove('playing'));
+  document.querySelectorAll(`.clip[data-i="${i}"],.audio-clip[data-i="${i}"]`).forEach(el=>el.classList.add('playing'));
   const v=document.getElementById('pvVideo');
   v.muted=pvVideoMuted();
   if(seg.hasVideo){
