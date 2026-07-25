@@ -390,6 +390,7 @@ let vState={}, tState={}, aState={}, sState={}, mState={enabled:false,in:0,out:0
 let sel=null, pps=26;
 let selectedTrack=null; // 轨道头部选中的轨道 key：video / tts / ambient / music / sub
 let pv={playing:false,segs:[],subSegs:[],idx:0,curT:0,raf:0,total:0};
+let pvAudioPool={}; // 预览音频池：key 为 `${track}-${sid}`（音乐为 'music'），值为 Audio 对象
 let subAll=true, subOff=new Set();
 
 function qs(n){return new URLSearchParams(location.search).get(n);}
@@ -698,6 +699,13 @@ function toggleMute(key){if(!tracksCfg[key])return;tracksCfg[key].enabled=!track
 function toggleSolo(key){if(solo.has(key))solo.delete(key);else solo.add(key);renderTimeline();}
 function selectTrack(key){
   selectedTrack=(selectedTrack===key)?null:key;
+  // 选中轨道隔离：非 video 轨选中时视频原声静音；播放中立即应用
+  const v=document.getElementById('pvVideo');if(v)v.muted=pvVideoMuted();
+  if(pv.playing){
+    startSegAudios(pv.idx,pv.curT);
+    const seg=pv.segs[pv.idx];
+    syncMusicGlobal(seg?seg.startX/pps+(pv.curT-seg.in):0);
+  }
   renderTimeline();
 }
 function setVol(key,v){if(!tracksCfg[key])return;tracksCfg[key].volume=parseFloat(v);const el=document.getElementById('vol_'+key);if(el)el.textContent=Math.round(v*100);}
@@ -972,6 +980,90 @@ function buildSubSegs(){
   });
   return segs;
 }
+
+// ---- 预览音频（tts / ambient / music 与视频同步播放） ----
+// 轨道是否允许发声：选中轨道（selectedTrack）时只播该轨；否则按 solo / enabled 判断
+function pvTrackOn(key){
+  if(selectedTrack)return selectedTrack===key;
+  return effEnabled(key);
+}
+// 视频原声静音：选中了非 video 轨时静音，选中 video 或未选中时恢复
+function pvVideoMuted(){return !!(selectedTrack&&selectedTrack!=='video');}
+function _pvAudioStart(a,key,startAt){
+  pvAudioPool[key]=a;
+  const cleanup=()=>{if(pvAudioPool[key]===a)delete pvAudioPool[key];};
+  a.onerror=cleanup;   // 文件不存在（如该场景无此音频）时静默移除
+  a.addEventListener('loadedmetadata',()=>{try{if(startAt>0&&a.duration&&startAt<a.duration)a.currentTime=startAt;}catch(e){}});
+  a.play().catch(cleanup);
+  return cleanup;
+}
+// TTS/ambient 按场景分段：音频从 st.in + 片段内已播放偏移处开始，片段切换时由 loadSeg 重启
+function startSegAudios(i,fromT){
+  stopSegAudios();
+  const seg=pv.segs[i];if(!seg)return;
+  const sid=seg.sid;
+  const elapsed=Math.max(0,(fromT!=null?fromT:seg.in)-seg.in);
+  // TTS 配音：同一场景可能有多条对白（tts_{sid}_00/01/...），按顺序连播
+  if(pvTrackOn('tts')&&tracksCfg&&tracksCfg.tts&&tracksCfg.tts.available){
+    const st=tState[sid]||{in:0};
+    const off=Math.max(0,st.in||0)+elapsed;
+    const vol=tracksCfg.tts.volume!=null?tracksCfg.tts.volume:1;
+    const playTts=(idx,startAt)=>{
+      const a=new Audio(`${API}/api/project-files/${pid}/edit_audio/tts_${sid}_${String(idx).padStart(2,'0')}.mp3`);
+      a.volume=vol;
+      _pvAudioStart(a,'tts-'+sid,startAt);
+      a.onended=()=>{
+        if(pvAudioPool['tts-'+sid]===a)delete pvAudioPool['tts-'+sid];
+        if(!pv.playing)return;
+        const cur=pv.segs[pv.idx];
+        if(cur&&cur.sid===sid)playTts(idx+1,0);
+      };
+    };
+    playTts(0,off);
+  }
+  // 场景音
+  if(pvTrackOn('ambient')&&tracksCfg&&tracksCfg.ambient&&tracksCfg.ambient.available){
+    const st=aState[sid]||{in:0};
+    const a=new Audio(`${API}/api/project-files/${pid}/sfx/${sid}_amb.mp3`);
+    a.volume=tracksCfg.ambient.volume!=null?tracksCfg.ambient.volume:0.32;
+    const done=_pvAudioStart(a,'ambient-'+sid,Math.max(0,st.in||0)+elapsed);
+    a.onended=done;
+  }
+}
+function stopSegAudios(){
+  for(const k in pvAudioPool){
+    if(k==='music')continue;
+    try{pvAudioPool[k].pause();}catch(e){}
+    delete pvAudioPool[k];
+  }
+}
+function stopAllPvAudio(){
+  for(const k in pvAudioPool){try{pvAudioPool[k].pause();}catch(e){}delete pvAudioPool[k];}
+}
+// 音乐整轨播放：跟随全局预览时间，从 mState.in 开始，到 mState.out（>0 时）结束
+function pvMusicAllowed(){return !!(tracksCfg&&tracksCfg.music&&tracksCfg.music.url&&pvTrackOn('music'));}
+function syncMusicGlobal(gt){
+  if(!pv.playing||!pvMusicAllowed()){stopMusic();return;}
+  const want=Math.max(0,mState.in||0)+Math.max(0,gt||0);
+  if(mState.out>0&&want>=mState.out){stopMusic();return;}
+  let a=pvAudioPool['music'];
+  if(!a){
+    a=new Audio(API+tracksCfg.music.url);
+    a.volume=tracksCfg.music.volume!=null?tracksCfg.music.volume:0.5;
+    a.ontimeupdate=()=>{if(mState.out>0&&a.currentTime>=mState.out){try{a.pause();}catch(e){}}};
+    _pvAudioStart(a,'music',want);
+    return;
+  }
+  try{
+    if(a.readyState>=1&&Math.abs(a.currentTime-want)>0.35)a.currentTime=want;
+    if(a.paused)a.play().catch(()=>{});
+  }catch(e){}
+}
+function stopMusic(){
+  const a=pvAudioPool['music'];
+  if(a){try{a.pause();}catch(e){}delete pvAudioPool['music'];}
+}
+
 function playPreview(){
   if(pv.playing){pausePreview();return;}
   pv.segs=buildPreviewSegs();
@@ -986,6 +1078,7 @@ function loadSeg(i,fromT){
   const seg=pv.segs[i];if(!seg)return;
   pv.idx=i;pv.curT=fromT!=null?fromT:seg.in;
   const v=document.getElementById('pvVideo');
+  v.muted=pvVideoMuted();
   if(seg.hasVideo){
     const s=origScenes.find(x=>x.sid===seg.sid)||{};
     const url=API+s.video_url;
@@ -997,6 +1090,9 @@ function loadSeg(i,fromT){
     try{v.pause();v.removeAttribute('src');v.load();}catch(e){}
     seg._t0=performance.now()-(Math.max(seg.in,pv.curT)-seg.in)*1000;
   }
+  // 同步启动该片段的 tts/ambient 音频，并对齐整轨音乐位置
+  startSegAudios(i,pv.curT);
+  syncMusicGlobal(seg.startX/pps+(pv.curT-seg.in));
 }
 // 预载首段视频：让监视器原生播放按钮一开始就可点
 function primePreview(){
@@ -1018,6 +1114,10 @@ function bindPreviewVideo(){
     if(pv.playing)return;
     if(!pv.segs.length)pv.segs=buildPreviewSegs();
     pv.playing=true;document.getElementById('pvPlay').textContent='⏸ 暂停';
+    v.muted=pvVideoMuted();
+    startSegAudios(pv.idx,pv.curT);
+    const seg=pv.segs[pv.idx];
+    syncMusicGlobal(seg?seg.startX/pps+(pv.curT-seg.in):0);
     pv.raf=requestAnimationFrame(pvTick);
   });
   v.addEventListener('pause',()=>{
@@ -1050,11 +1150,13 @@ function pvTick(){
 function pausePreview(){
   pv.playing=false;cancelAnimationFrame(pv.raf);
   try{document.getElementById('pvVideo').pause();}catch(e){}
+  stopAllPvAudio();
   document.getElementById('pvPlay').textContent='▶ 预览整片';
 }
 function stopPreview(done){
   pv.playing=false;cancelAnimationFrame(pv.raf);
   try{document.getElementById('pvVideo').pause();}catch(e){}
+  stopAllPvAudio();
   document.getElementById('pvPlay').textContent='▶ 预览整片';
   if(done){pv.idx=0;pv.curT=0;pv.curSid=null;pv._capIdx=-1;updatePlayhead();updatePvTime();updateCaption(null);}
 }
