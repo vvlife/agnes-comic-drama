@@ -39,7 +39,11 @@ header .spacer{flex:1}
 .track{display:flex;height:84px;border-bottom:1px solid var(--border)}
 .track:last-child{border-bottom:none}
 .track-head{width:var(--hw,170px);min-width:var(--hw,170px);flex-shrink:0;position:sticky;left:0;z-index:10;
-  background:var(--surface-2);border-right:1px solid var(--border);padding:8px 10px;display:flex;flex-direction:column;gap:5px;justify-content:center}
+  background:var(--surface-2);border-right:1px solid var(--border);padding:8px 10px;display:flex;flex-direction:column;gap:5px;justify-content:center;cursor:pointer;transition:all var(--transition-base)}
+.track-head:hover{background:var(--surface-3)}
+.track-head.sel{background:var(--accent-gradient);box-shadow:inset 3px 0 0 #fff, var(--shadow-glow)}
+.track-head.sel .nm,.track-head.sel .hint,.track-head.sel .ctl button,.track-head.sel .vol{color:#fff}
+.track-head.sel .ctl input[type=range]{accent-color:#fff}
 .track-head .nm{font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;color:var(--text-primary)}
 .track-head .ctl{display:flex;align-items:center;gap:6px}
 .track-head .ctl button{width:24px;height:22px;background:var(--surface-3);color:var(--text-secondary);font-size:11px;font-weight:700}
@@ -134,6 +138,7 @@ header .spacer{flex:1}
 .empty .empty-icon{font-size:56px;margin-bottom:16px;opacity:.92;filter:drop-shadow(0 0 18px var(--accent-glow))}
 .empty .empty-title{font-size:16px;font-weight:700;color:var(--text-primary);margin-bottom:6px}
 .hint{font-size:11px;color:var(--text-muted);margin-top:6px;line-height:1.5}
+.kbd-hint{font-size:10px;color:var(--text-muted);opacity:0.85}
 
 /* ---- 加载中缓冲遮罩 ---- */
 .loading{position:fixed;inset:0;left:var(--sbw);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:var(--bg);z-index:80;transition:opacity var(--transition-slow);animation:fadeIn .3s ease}
@@ -270,7 +275,8 @@ body.nav-collapsed .loading{left:66px}
         <button class="btn-ghost btn-small" onclick="stopPreview(true)">⏹ 停止</button>
         <span class="pv-time">已播 <b id="pvTime">0.0</b>s / 共 <b id="pvTotal">0.0</b>s</span>
       </div>
-      <div class="hint">▶ 按当前顺序、裁剪、静音/独奏实时连放整条影片；时间轴上红色播放头会同步移动。点时间轴刻度可定位到该时刻。</div>
+      <div class="hint">▶ 按当前顺序、裁剪、静音/独奏实时连放整条影片；时间轴上红色播放头会同步移动。点时间轴刻度可定位到该时刻。<br>
+      <span class="kbd-hint">快捷键：空格 播放/暂停 · ←/→ ±1s · Shift+←/→ ±5s · J/K/L -5s/暂停/+5s · Home/End 开头/结尾 · 点击轨道头选中轨道后按 S 独奏 / M 静音</span></div>
     </div>
   </div>
 
@@ -382,6 +388,7 @@ let pid=null, origScenes=[], order=[], tracksCfg=null, solo=new Set();
 let charMap={};  // 角色 id -> 名称，字幕/标签只显示角色名，不显示 C1/C2 一类 id
 let vState={}, tState={}, aState={}, sState={}, mState={enabled:false,in:0,out:0};
 let sel=null, pps=26;
+let selectedTrack=null; // 轨道头部选中的轨道 key：video / tts / ambient / music / sub
 let pv={playing:false,segs:[],subSegs:[],idx:0,curT:0,raf:0,total:0};
 let subAll=true, subOff=new Set();
 
@@ -507,7 +514,7 @@ function renderTimeline(){
   html+=`</div>`;
 
   // V1 视频轨
-  html+=`<div class="track v1"><div class="track-head"><div class="nm">🎬 V1 · 视频</div><div class="hint">拖拽排序</div></div><div class="track-body">`;
+  html+=`<div class="track v1"><div class="track-head ${selectedTrack==='video'?'sel':''}" onclick="selectTrack('video')"><div class="nm">🎬 V1 · 视频</div><div class="hint">拖拽排序</div></div><div class="track-body">`;
   order.forEach((sid,i)=>{
     const s=origScenes.find(x=>x.sid===sid)||{};
     const e=vState[sid];
@@ -530,7 +537,7 @@ function renderTimeline(){
   defs.forEach(({key,cls,cap})=>{
     const t=tracksCfg?tracksCfg[key]:null;const label=t?t.label:key;const avail=t?t.available:false;
     const en=effEnabled(key);const vol=t?t.volume:0.5;const soloOn=solo.has(key);
-    html+=`<div class="track ${cls}"><div class="track-head"><div class="nm">${label}</div><div class="ctl">`;
+    html+=`<div class="track ${cls}"><div class="track-head ${selectedTrack===key?'sel':''}" onclick="selectTrack('${key}')"><div class="nm">${label}</div><div class="ctl">`;
     if(avail){
       html+=`<button class="${en?'on':''}" title="静音" onclick="toggleMute('${key}')">M</button>`;
       html+=`<button class="solo ${soloOn?'on':''}" title="独奏" onclick="toggleSolo('${key}')">S</button>`;
@@ -559,7 +566,7 @@ function renderTimeline(){
   // 音乐轨
   const mt=tracksCfg?tracksCfg.music:null;
   const mAvail=mt?mt.available:false;const mEn=effEnabled('music');
-  html+=`<div class="track a3"><div class="track-head"><div class="nm">🎵 音乐</div><div class="ctl">`;
+  html+=`<div class="track a3"><div class="track-head ${selectedTrack==='music'?'sel':''}" onclick="selectTrack('music')"><div class="nm">🎵 音乐</div><div class="ctl">`;
   if(mAvail){
     html+=`<button class="${mEn?'on':''}" title="静音" onclick="toggleMute('music')">M</button>`;
     html+=`<button class="solo ${solo.has('music')?'on':''}" title="独奏" onclick="toggleSolo('music')">S</button>`;
@@ -586,7 +593,7 @@ function renderTimeline(){
 
   // 字幕轨（与视频轨逐镜对齐：遍历全部镜头，无对白处留占位）
   const hasSub=order.some(sid=>((origScenes.find(x=>x.sid===sid)||{}).dialogue||[]).length);
-  html+=`<div class="track sub"><div class="track-head"><div class="nm">🗨 字幕</div><div class="ctl"><button class="${subAll?'on':''}" title="全部字幕显隐" onclick="toggleSubAll()">CC</button></div></div><div class="track-body">`;
+  html+=`<div class="track sub"><div class="track-head ${selectedTrack==='sub'?'sel':''}" onclick="selectTrack('sub')"><div class="nm">🗨 字幕</div><div class="ctl"><button class="${subAll?'on':''}" title="全部字幕显隐" onclick="toggleSubAll()">CC</button></div></div><div class="track-body">`;
   if(hasSub){
     order.forEach(sid=>{
       const s=origScenes.find(x=>x.sid===sid)||{};
@@ -689,6 +696,10 @@ function setSelOut(v){const st=curState();if(!st)return;let raw=parseFloat(v);if
 
 function toggleMute(key){if(!tracksCfg[key])return;tracksCfg[key].enabled=!tracksCfg[key].enabled;renderTimeline();}
 function toggleSolo(key){if(solo.has(key))solo.delete(key);else solo.add(key);renderTimeline();}
+function selectTrack(key){
+  selectedTrack=(selectedTrack===key)?null:key;
+  renderTimeline();
+}
 function setVol(key,v){if(!tracksCfg[key])return;tracksCfg[key].volume=parseFloat(v);const el=document.getElementById('vol_'+key);if(el)el.textContent=Math.round(v*100);}
 function toggleSubAll(){subAll=!subAll;renderTimeline();updateCaption(pvGlobalT());}
 function toggleSub(sid){if(subOff.has(sid))subOff.delete(sid);else subOff.add(sid);renderTimeline();updateCaption(pvGlobalT());}
@@ -1099,7 +1110,77 @@ function scrub(e){
 
 /* 左侧菜单栏导航由共享组件 /sidebar.js 提供 */
 
-  init();
+// ---- 键盘快捷键 ----
+function _isEditableTarget(t){
+  if(!t)return false;
+  const tag=(t.tagName||'').toLowerCase();
+  return tag==='input'||tag==='textarea'||tag==='select'||t.isContentEditable;
+}
+function seekBy(delta){
+  let segs=pv.segs;if(!segs.length)segs=buildPreviewSegs();if(!segs.length)return;
+  let gt;
+  if(pv.playing){
+    gt=pvGlobalT();
+    if(gt==null)gt=0;
+  }else{
+    // 未播放时用当前片段起始时间
+    const seg=segs[pv.idx]||segs[0];
+    gt=seg.startX/pps+(pv.curT-seg.in);
+  }
+  gt=Math.max(0,gt+delta);
+  // 找到目标片段
+  let target=null,local=0;
+  for(const s of segs){
+    const start=s.startX/pps,end=start+(s.out-s.in);
+    if(gt>=start&&gt<end){target=s;local=s.in+(gt-start);break;}
+  }
+  if(!target){target=segs[segs.length-1];local=target.out;}
+  pv.segs=segs;pv.idx=segs.indexOf(target);
+  pv.curT=local;updatePlayhead();updatePvTime();
+  updateCaption(target.startX/pps+(local-target.in));
+  if(pv.playing){loadSeg(pv.idx,local);}
+  else{
+    const v=document.getElementById('pvVideo');
+    if(target.hasVideo){v.src=API+(origScenes.find(x=>x.sid===target.sid)||{}).video_url;v.onloadedmetadata=()=>{try{v.currentTime=local;}catch(e){}};}
+  }
+}
+function seekToStart(){
+  let segs=pv.segs;if(!segs.length)segs=buildPreviewSegs();if(!segs.length)return;
+  pv.idx=0;pv.curT=segs[0].in;updatePlayhead();updatePvTime();updateCaption(0);
+  if(pv.playing)loadSeg(0,segs[0].in);
+  else{
+    const v=document.getElementById('pvVideo');
+    if(segs[0].hasVideo){v.src=API+(origScenes.find(x=>x.sid===segs[0].sid)||{}).video_url;v.onloadedmetadata=()=>{try{v.currentTime=segs[0].in;}catch(e){}};}
+  }
+}
+function seekToEnd(){
+  let segs=pv.segs;if(!segs.length)segs=buildPreviewSegs();if(!segs.length)return;
+  const last=segs[segs.length-1];
+  pv.idx=segs.length-1;pv.curT=last.out;updatePlayhead();updatePvTime();updateCaption(last.startX/pps+(last.out-last.in));
+  if(pv.playing)loadSeg(pv.idx,last.out);
+  else{
+    const v=document.getElementById('pvVideo');
+    if(last.hasVideo){v.src=API+(origScenes.find(x=>x.sid===last.sid)||{}).video_url;v.onloadedmetadata=()=>{try{v.currentTime=last.out;}catch(e){}};}
+  }
+}
+function setupKeyboardShortcuts(){
+  document.addEventListener('keydown',function(e){
+    if(_isEditableTarget(e.target))return;
+    const k=e.key;
+    if(k===' '){e.preventDefault();playPreview();return;}
+    if(k==='ArrowLeft'){e.preventDefault();seekBy(e.shiftKey?-5:-1);return;}
+    if(k==='ArrowRight'){e.preventDefault();seekBy(e.shiftKey?5:1);return;}
+    if(k==='Home'){e.preventDefault();seekToStart();return;}
+    if(k==='End'){e.preventDefault();seekToEnd();return;}
+    if((k==='s'||k==='S')&&selectedTrack){e.preventDefault();toggleSolo(selectedTrack);return;}
+    if((k==='m'||k==='M')&&selectedTrack){e.preventDefault();toggleMute(selectedTrack);return;}
+    if((k==='j'||k==='J')){e.preventDefault();seekBy(-5);return;}
+    if((k==='k'||k==='K')){e.preventDefault();pausePreview();return;}
+    if((k==='l'||k==='L')){e.preventDefault();seekBy(5);return;}
+  });
+}
+setupKeyboardShortcuts();
+init();
 </script>
 
 <script>
